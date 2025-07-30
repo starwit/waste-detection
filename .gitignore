@@ -1,0 +1,43 @@
+.vscode
+.gitignore_local
+.venv
+# experiment results
+runs/
+results_comparison/
+
+# python artifacts
+__pycache__
+
+# zip files
+*.zip
+
+# exports
+*_openvino_model
+*.torchscript
+*.onnx
+*.engine
+*.cache
+*.pt
+
+# dataset-images
+datasets/*
+# !*/datasets/.gitkeep
+
+raw_data/*
+*/videos_and_labels/*/*.mp4
+*/videos_and_labels/*/*.json
+
+# carmel-videos
+dataset/test/videos/
+dataset/train/videos/
+dataset/valid/videos/
+
+Konsortialtreffen/*
+*.txt
+*.mp4
+
+*/results*.csv
+/raw_data
+/results_comparison
+/runs
+/metrics.json

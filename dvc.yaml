@@ -1,0 +1,46 @@
+# dvc.yaml
+stages:
+  prepare_data:
+    cmd: >
+      python yolov8_training/train_pipeline.py --stage prepare
+      --dataset-name ${data.dataset_name}
+      --val-split ${prepare.val_split}
+      --test-split ${prepare.test_split}
+      --augment-multiplier ${prepare.augment_multiplier}
+      --recreate-dataset
+    params:
+      - data.dataset_name
+      - prepare
+    deps:
+      - yolov8_training/train_pipeline.py
+      - yolov8_training/utils/data_utils.py
+      - yolov8_training/utils/find_duplicates.py
+      - yolov8_training/utils/augmentation.py
+      - raw_data/
+    outs:
+      - datasets/${data.dataset_name}
+
+  train_and_evaluate:
+    cmd: >
+      python yolov8_training/train_pipeline.py --stage train
+      --dataset-name ${data.dataset_name}
+      --model-size ${train.model_size}
+      --image-size ${train.image_size}
+      --epochs ${train.epochs}
+      --batch-size ${train.batch_size}
+      --val-split ${prepare.val_split}
+    params:
+      - data
+      - prepare.val_split
+      - train
+    deps:
+      - yolov8_training/train_pipeline.py
+      - yolov8_training/utils/evaluate.py
+      - yolov8_training/utils/data_utils.py
+      - yolov8_training/utils/find_duplicates.py
+      - datasets/${data.dataset_name}
+    outs:
+      - runs
+      - results_comparison/
+    metrics: 
+      - metrics.json

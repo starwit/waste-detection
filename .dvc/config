@@ -1,0 +1,6 @@
+[core]
+    remote = dvc-hetzner
+['remote "dvc-hetzner"']
+    url = ssh://u420375-sub1.your-storagebox.de/<PLACEHOLDER>
+    user = u420375-sub1
+    verify = true

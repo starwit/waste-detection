@@ -1,0 +1,13 @@
+data:
+  dataset_name: "<DATASET_NAME>"
+
+prepare:
+  val_split: 0.1
+  test_split: 0.1
+  augment_multiplier: 1
+
+train:
+  model_size: "m"
+  image_size: 1280
+  epochs: 1
+  batch_size: 8
