@@ -121,10 +121,28 @@ def is_in_facility_area(point: GPSPoint, facility_area: Optional[FacilityArea]) 
             lon_min <= point.lon <= lon_max)
 
 
+def calculate_segment_max_distance(gps_points: List[GPSPoint], start_index: int, end_index: int) -> float:
+    """Calculate the maximum distance using min/max extents in both dimensions."""
+    if start_index >= end_index or end_index >= len(gps_points):
+        return 0.0
+        
+    segment_points = gps_points[start_index:end_index + 1]
+    
+    # Find min/max coordinates
+    lats = [point.lat for point in segment_points]
+    lons = [point.lon for point in segment_points]
+    
+    lat_min, lat_max = min(lats), max(lats)
+    lon_min, lon_max = min(lons), max(lons)
+    
+    # Calculate distance between opposite corners of bounding box
+    return geodesic((lat_min, lon_min), (lat_max, lon_max)).meters
+
+
 def find_cleaning_segments(gps_points: List[GPSPoint], speeds: List[float], 
-                          max_speed: float, min_duration: int,
+                          max_speed: float, min_duration: int, min_distance: float,
                           facility_area: Optional[FacilityArea]) -> List[CleaningSegment]:
-    """Identify cleaning run segments based on speed and duration criteria."""
+    """Identify cleaning run segments based on speed, duration and distance criteria."""
     if len(gps_points) != len(speeds):
         return []
         
@@ -135,15 +153,17 @@ def find_cleaning_segments(gps_points: List[GPSPoint], speeds: List[float],
         # Skip points in facility area
         if is_in_facility_area(point, facility_area):
             if current_start is not None:
-                # End current segment if it was long enough
+                # End current segment if it meets all criteria
                 duration = (gps_points[i-1].timestamp - gps_points[current_start].timestamp).total_seconds()
                 if duration >= min_duration:
-                    segments.append(CleaningSegment(
-                        start_time=gps_points[current_start].timestamp,
-                        end_time=gps_points[i-1].timestamp,
-                        start_index=current_start,
-                        end_index=i-1
-                    ))
+                    max_distance = calculate_segment_max_distance(gps_points, current_start, i-1)
+                    if max_distance >= min_distance:
+                        segments.append(CleaningSegment(
+                            start_time=gps_points[current_start].timestamp,
+                            end_time=gps_points[i-1].timestamp,
+                            start_index=current_start,
+                            end_index=i-1
+                        ))
                 current_start = None
             continue
             
@@ -153,27 +173,31 @@ def find_cleaning_segments(gps_points: List[GPSPoint], speeds: List[float],
                 current_start = i
         else:
             if current_start is not None:
-                # Check if segment is long enough
+                # Check if segment meets all criteria
                 duration = (gps_points[i-1].timestamp - gps_points[current_start].timestamp).total_seconds()
                 if duration >= min_duration:
-                    segments.append(CleaningSegment(
-                        start_time=gps_points[current_start].timestamp,
-                        end_time=gps_points[i-1].timestamp,
-                        start_index=current_start,
-                        end_index=i-1
-                    ))
+                    max_distance = calculate_segment_max_distance(gps_points, current_start, i-1)
+                    if max_distance >= min_distance:
+                        segments.append(CleaningSegment(
+                            start_time=gps_points[current_start].timestamp,
+                            end_time=gps_points[i-1].timestamp,
+                            start_index=current_start,
+                            end_index=i-1
+                        ))
                 current_start = None
     
     # Handle case where segment extends to end of data
     if current_start is not None:
         duration = (gps_points[-1].timestamp - gps_points[current_start].timestamp).total_seconds()
         if duration >= min_duration:
-            segments.append(CleaningSegment(
-                start_time=gps_points[current_start].timestamp,
-                end_time=gps_points[-1].timestamp,
-                start_index=current_start,
-                end_index=len(gps_points)-1
-            ))
+            max_distance = calculate_segment_max_distance(gps_points, current_start, len(gps_points)-1)
+            if max_distance >= min_distance:
+                segments.append(CleaningSegment(
+                    start_time=gps_points[current_start].timestamp,
+                    end_time=gps_points[-1].timestamp,
+                    start_index=current_start,
+                    end_index=len(gps_points)-1
+                ))
     
     return segments
 
@@ -274,10 +298,12 @@ def main():
     parser = argparse.ArgumentParser(description='Filter cleaning runs from street cleaner videos')
     parser.add_argument('input_dir', type=Path, help='Directory containing video and GPS files')
     parser.add_argument('output_dir', type=Path, help='Output directory for filtered video segments')
-    parser.add_argument('--max-speed', type=float, default=15.0, 
-                       help='Maximum speed (km/h) for cleaning activity (default: 15.0)')
+    parser.add_argument('--max-speed', type=float, default=20.0, 
+                       help='Maximum speed (km/h) for cleaning activity (default: 20.0)')
     parser.add_argument('--min-duration', type=int, default=120,
                        help='Minimum duration (seconds) for cleaning segments (default: 120)')
+    parser.add_argument('--min-distance', type=float, default=20.0,
+                       help='Minimum maximum extent (meters) of segment (default: 20.0)')
     parser.add_argument('--window-size', type=int, default=5,
                        help='Window size for speed calculation (default: 5)')
     parser.add_argument('--facility-area', type=str,
@@ -320,7 +346,7 @@ def main():
         
         # Find cleaning segments
         segments = find_cleaning_segments(gps_points, speeds, args.max_speed, 
-                                        args.min_duration, facility_area)
+                                        args.min_duration, args.min_distance, facility_area)
         
         print(f"  Found {len(segments)} cleaning segments")
         
