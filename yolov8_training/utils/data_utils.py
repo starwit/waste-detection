@@ -111,6 +111,50 @@ selected_classes = [
 selected_coco_classes = {i: selected_classes[i] for i in range(len(selected_classes))}
 
 
+def get_class_mapping(custom_classes=None, use_coco_classes=True):
+    """
+    Get the class mapping to use for the dataset.
+    
+    Args:
+        custom_classes (list): List of custom class names
+        use_coco_classes (bool): Whether to use COCO classes when custom_classes is empty
+        
+    Returns:
+        dict: Class mapping {id: name}
+    """
+    if custom_classes:
+        return {i: class_name for i, class_name in enumerate(custom_classes)}
+    elif use_coco_classes:
+        return selected_coco_classes
+    else:
+        return {}
+
+
+def map_class_names_to_ids(class_names, target_mapping):
+    """
+    Map class names to target class IDs.
+    
+    Args:
+        class_names (dict): Source class mapping {id: name}
+        target_mapping (dict): Target class mapping {id: name}
+        
+    Returns:
+        dict: Mapping from source IDs to target IDs
+    """
+    mapping = {}
+    target_name_to_id = {name.lower(): id for id, name in target_mapping.items()}
+    
+    for source_id, source_name in class_names.items():
+        source_name_lower = source_name.lower()
+        if source_name_lower in target_name_to_id:
+            mapping[int(source_id)] = target_name_to_id[source_name_lower]
+            print(f"Mapped {source_name} ({source_id}) → {source_name} ({target_name_to_id[source_name_lower]})")
+        else:
+            print(f"Warning: No mapping found for class '{source_name}' (ID: {source_id})")
+    
+    return mapping
+
+
 def sorted_iterdir(path):
     return sorted(path.iterdir(), key=lambda p: p.name)
 
@@ -128,13 +172,14 @@ def check_for_test_images(test_image_input_path):
     return test_exists
 
 
-def remap_yaml_dataset_labels(dataset_dir: Path) -> None:
+def remap_yaml_dataset_labels(dataset_dir: Path, target_class_mapping: dict) -> None:
     """
     Processes a dataset with data.yaml:
-    Remaps labels to match COCO classes without moving files
+    Remaps labels to match target classes without moving files
 
     Args:
         dataset_dir: Path to the dataset directory containing data.yaml
+        target_class_mapping: Target class mapping {id: name}
     """
     yaml_file = dataset_dir / "data.yaml"
     if not yaml_file.exists():
@@ -146,14 +191,8 @@ def remap_yaml_dataset_labels(dataset_dir: Path) -> None:
     with open(yaml_file, "r") as f:
         dataset_config = yaml.safe_load(f)
 
-    class_mapping = {}
-    for class_id, class_name in dataset_config["names"].items():
-        class_id = int(class_id)
-        for coco_name, coco_id in COCO_CLASSES.items():
-            if class_name.lower() == coco_name.lower():
-                class_mapping[class_id] = coco_id
-                print(f"Mapped {class_name} ({class_id}) → {coco_name} ({coco_id})")
-                break
+    # Get mapping from source class names to target class IDs
+    class_mapping = map_class_names_to_ids(dataset_config["names"], target_class_mapping)
 
     # Update all label files in the dataset directory recursively
     for label_file in dataset_dir.rglob("*.txt"):
@@ -171,12 +210,23 @@ def remap_yaml_dataset_labels(dataset_dir: Path) -> None:
                 if orig_class_id in class_mapping:
                     parts[0] = str(class_mapping[orig_class_id])
                     new_lines.append(" ".join(parts) + "\n")
+                else:
+                    # Skip labels for classes that couldn't be mapped
+                    print(f"Skipping label with unmapped class ID: {orig_class_id}")
 
         with open(label_file, "w") as f:
             f.writelines(new_lines)
 
 
-def create_dataset_yaml(dataset_path: Path):
+def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True):
+    """
+    Create dataset.yaml file with appropriate class mapping.
+    
+    Args:
+        dataset_path: Path to the dataset directory
+        custom_classes: List of custom class names
+        use_coco_classes: Whether to use COCO classes when custom_classes is empty
+    """
     # Get all parts of the path
     yaml_dataset_path = dataset_path.absolute()
 
@@ -187,11 +237,15 @@ val: val/images
 
 names:
 """
-    for key, value in selected_coco_classes.items():
+    
+    class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+    for key, value in class_mapping.items():
         yaml_content += f"  {key}: {value}\n"
 
     with open(dataset_path / "dataset.yaml", "w") as f:
         f.write(yaml_content)
+    
+    print(f"Created dataset.yaml with {len(class_mapping)} classes: {list(class_mapping.values())}")
 
 
 def ensure_equal_files(frames_path, labels_path):
@@ -350,10 +404,22 @@ def process_single_images(
     val_split: float,
     test_split: float,
     augment_multiplier: int,
+    custom_classes=None,
+    use_coco_classes=True,
 ):
     """
     Process single images and their labels, splitting them into train/val/test sets.
     Now handles both traditional folder structure and CVAT exports with train.txt
+    
+    Args:
+        input_path: Path to input images
+        train_output_path: Path to store training data
+        test_output_path: Path to store test data
+        val_split: Validation split ratio
+        test_split: Test split ratio
+        augment_multiplier: Augmentation multiplier
+        custom_classes: List of custom class names
+        use_coco_classes: Whether to use COCO classes when custom_classes is empty
     """
     # Create output directories
     train_img_output_path = train_output_path / "train" / "images"
@@ -387,6 +453,9 @@ def process_single_images(
 
     # Track if we're processing test data
     is_test_data = (test_output_path == train_output_path) and (val_split == 1)
+    
+    # Get target class mapping for remapping
+    target_class_mapping = get_class_mapping(custom_classes, use_coco_classes)
 
     for some_folder in sorted_iterdir(input_path):
         if not some_folder.is_dir():
@@ -436,7 +505,7 @@ def process_single_images(
             if (folder_to_process / "data.yaml").exists():
                 temp_folder = some_folder.parent / f"{some_folder.name}_temp"
                 shutil.copytree(folder_to_process, temp_folder)
-                remap_yaml_dataset_labels(temp_folder)
+                remap_yaml_dataset_labels(temp_folder, target_class_mapping)
                 temp_folders.append(temp_folder)
 
                 # Update paths to use temp folder
@@ -457,6 +526,7 @@ def process_single_images(
                     for img_path, lbl_path, scene_name in image_label_pairs
                 ]
         else:
+            # Manual dataset structure with images/ and labels/ folders
             images_folder = folder_to_process / "images"
             labels_folder = folder_to_process / "labels"
 
@@ -469,6 +539,7 @@ def process_single_images(
                 labels_folder.mkdir(parents=True, exist_ok=True)
 
             # Collect valid image-label pairs
+            temp_pairs = []
             for image_file in sorted_glob(images_folder.glob("*")):
                 if image_file.is_file() and image_file.suffix.lower() in [
                     ".jpg",
@@ -484,7 +555,53 @@ def process_single_images(
                             pass
                         empty_label_count += 1
 
-                    image_label_pairs.append((image_file, label_file, scene_name))
+                    temp_pairs.append((image_file, label_file, scene_name))
+
+            # Check if this manual structure has a data.yaml for class mapping
+            data_yaml_path = folder_to_process / "data.yaml"
+            if data_yaml_path.exists():
+                print(f"Found data.yaml in manual structure: {folder_to_process.name}")
+                
+                # Validate the data.yaml has class names that can be mapped
+                try:
+                    with open(data_yaml_path, "r") as f:
+                        yaml_config = yaml.safe_load(f)
+                    
+                    if "names" not in yaml_config:
+                        raise ValueError("data.yaml missing 'names' section")
+                    
+                    # Check if we can map any classes
+                    yaml_classes = yaml_config["names"]
+                    mapping = map_class_names_to_ids(yaml_classes, target_class_mapping)
+                    
+                    if not mapping:
+                        print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
+                        print(f"Source classes: {list(yaml_classes.values())}")
+                        print(f"Target classes: {list(target_class_mapping.values())}")
+                        # Still process the data but labels may be filtered out
+                    
+                    # Create temp folder and remap labels
+                    temp_folder = some_folder.parent / f"{some_folder.name}_temp"
+                    shutil.copytree(folder_to_process, temp_folder)
+                    remap_yaml_dataset_labels(temp_folder, target_class_mapping)
+                    temp_folders.append(temp_folder)
+
+                    # Update paths to use temp folder
+                    temp_pairs = [
+                        (
+                            Path(str(img_path).replace(str(folder_to_process), str(temp_folder))),
+                            Path(str(lbl_path).replace(str(folder_to_process), str(temp_folder))),
+                            scene_name,
+                        )
+                        for img_path, lbl_path, scene_name in temp_pairs
+                    ]
+                    
+                except Exception as e:
+                    print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
+                    print("Continuing without class mapping for this folder.")
+            
+            # Add all pairs from this folder
+            image_label_pairs.extend(temp_pairs)
 
     print(f"Included {empty_label_count} images with empty labels (no objects).")
     print(f"Skipped {skip_count} images that couldn't be found.")

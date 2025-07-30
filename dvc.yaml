@@ -9,7 +9,7 @@ stages:
       --augment-multiplier ${prepare.augment_multiplier}
       --recreate-dataset
     params:
-      - data.dataset_name
+      - data
       - prepare
     deps:
       - yolov8_training/train_pipeline.py

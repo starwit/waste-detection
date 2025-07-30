@@ -6,6 +6,7 @@ import random
 from pathlib import Path
 import numpy as np
 import torch
+import yaml
 from ultralytics import YOLO
 from yolov8_training.utils.data_utils import (
     check_for_test_images,
@@ -19,6 +20,24 @@ from yolov8_training.utils.evaluate import (
 )
 
 from yolov8_training.utils.find_duplicates import DuplicateDetector
+
+def load_class_config():
+    """Load class configuration from params.yaml"""
+    try:
+        with open("params.yaml", "r") as f:
+            params = yaml.safe_load(f)
+        
+        custom_classes = params.get("data", {}).get("custom_classes", [])
+        use_coco_classes = params.get("data", {}).get("use_coco_classes", True)
+        
+        # Filter out None/empty values from custom_classes
+        if custom_classes:
+            custom_classes = [cls for cls in custom_classes if cls]
+        
+        return custom_classes, use_coco_classes
+    except Exception as e:
+        print(f"Warning: Could not load params.yaml: {e}")
+        return [], True
 
 def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100
@@ -73,7 +92,9 @@ def process_data(
     test_output_path,
     val_split,
     test_split,
-    augment_multiplier
+    augment_multiplier,
+    custom_classes=None,
+    use_coco_classes=True
 ):
     """
     Process image data for training and validation.
@@ -84,13 +105,17 @@ def process_data(
         test_output_path (Path): Path to store test data.
         val_split (float): Validation split ratio.
         test_split (float): Test split ratio.
+        augment_multiplier (int): Augmentation multiplier.
+        custom_classes (list): List of custom class names.
+        use_coco_classes (bool): Whether to use COCO classes when custom_classes is empty.
 
     Returns:
         int, int, int: Total frames for training, validation and test.
     """
     if image_input_path.exists():
         return process_single_images(
-            image_input_path, train_output_path, test_output_path, val_split, test_split, augment_multiplier
+            image_input_path, train_output_path, test_output_path, val_split, test_split, 
+            augment_multiplier, custom_classes, use_coco_classes
         )
     return 0, 0, 0
 
@@ -112,6 +137,9 @@ def run_prepare_stage(args):
     val_split = float(args.val_split)
     recreate_dataset = args.recreate_dataset
     augment_multiplier=args.augment_multiplier
+    
+    # Load class configuration
+    custom_classes, use_coco_classes = load_class_config()
     
     # Define paths
     base_input_path = Path("raw_data")
@@ -166,10 +194,12 @@ def run_prepare_stage(args):
             test_output_path=test_path,
             val_split=val_split,
             test_split=test_split,
-            augment_multiplier=augment_multiplier
+            augment_multiplier=augment_multiplier,
+            custom_classes=custom_classes,
+            use_coco_classes=use_coco_classes
         )
 
-        create_dataset_yaml(training_path)
+        create_dataset_yaml(training_path, custom_classes, use_coco_classes)
 
         test_folder_frame_count = 0
         if test_data_exists:
@@ -180,10 +210,12 @@ def run_prepare_stage(args):
                 test_output_path=test_path,
                 val_split=1,
                 test_split=0,
-                augment_multiplier=1
+                augment_multiplier=1,
+                custom_classes=custom_classes,
+                use_coco_classes=use_coco_classes
             )
 
-        create_dataset_yaml(test_path)
+        create_dataset_yaml(test_path, custom_classes, use_coco_classes)
 
         print(f"Total training frames: {total_train_frames}")
         print(f"Total validation frames: {total_val_frames}")
