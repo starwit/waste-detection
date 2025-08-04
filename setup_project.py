@@ -4,21 +4,23 @@ Interactive first-time setup for a repo created from the YOLO-DVC template.
 
 DOES:
   • ask for project & dataset names
+  • optionally set custom classes
   • patch .dvc/config   (remote URL)
-  • patch params.yaml   (dataset_name, experiment_name)
+  • patch params.yaml   (dataset_name, experiment_name, classes)
 """
+
 import configparser
 import pathlib
 import sys
 import textwrap
-import yaml
+from ruamel.yaml import YAML
 
-ROOT        = pathlib.Path(__file__).resolve().parents[0]      # repo root
+ROOT = pathlib.Path(__file__).resolve().parents[0]
 CONFIG_FILE = ROOT / ".dvc" / "config"
 PARAMS_FILE = ROOT / "params.yaml"
 
-REMOTE_SEC  = '\'remote "dvc-hetzner"\''       # section name inside .dvc/config
-BASE_URL    = "ssh://u420375-sub1.your-storagebox.de"   # constant part
+REMOTE_SEC = '\'remote "dvc-hetzner"\''
+BASE_URL = "ssh://u420375-sub1.your-storagebox.de"
 
 
 def prompt(question: str, *, default: str | None = None) -> str:
@@ -46,10 +48,38 @@ def patch_dvc_config(project_slug: str) -> None:
 
 
 def patch_params_yaml(dataset: str, experiment: str) -> None:
-    params = yaml.safe_load(PARAMS_FILE.read_text())
-    params["data"]["dataset_name"]    = dataset
+    yaml = YAML()
+    yaml.preserve_quotes = True
+
+    with PARAMS_FILE.open("r") as f:
+        params = yaml.load(f)
+
+    # Basic fields
+    params["data"]["dataset_name"] = dataset
     params["data"]["experiment_name"] = experiment
-    PARAMS_FILE.write_text(yaml.safe_dump(params, sort_keys=False))
+
+    # Ask about custom classes
+    use_custom = input("Do you want to use custom classes? [y/N]: ").strip().lower() == "y"
+
+    if use_custom:
+        class_input = input("Enter custom classes (comma-separated): ").strip()
+        classes = [c.strip() for c in class_input.split(",") if c.strip()]
+        if classes:
+            params["data"]["custom_classes"] = classes
+            params["data"]["use_coco_classes"] = False
+        else:
+            print("⚠️  No valid classes entered. Falling back to COCO classes.")
+            params["data"].pop("custom_classes", None)
+            params["data"]["use_coco_classes"] = True
+    else:
+        # COCO fallback: remove custom_classes entirely
+        params["data"].pop("custom_classes", None)
+        params["data"]["use_coco_classes"] = True
+
+    with PARAMS_FILE.open("w") as f:
+        yaml.dump(params, f)
+
+
 
 def make_raw_data_dirs() -> None:
     for sub in ("train", "test"):
@@ -62,10 +92,9 @@ def main() -> None:
     print("│  YOLO-DVC template - initial configuration                   │")
     print("╰──────────────────────────────────────────────────────────────╯\n")
 
-    project  = prompt("Project name (e.g. waste-detection)")
-    dataset  = prompt("Dataset name (Enter = same as project)", default=project)
+    project = prompt("Project name (e.g. waste-detection)")
+    dataset = prompt("Dataset name (Enter = same as project)", default=project)
 
-    # patch files
     patch_dvc_config(project)
     patch_params_yaml(dataset, project)
 
