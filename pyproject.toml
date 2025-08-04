@@ -27,6 +27,7 @@ pandas = "^2.2.3"
 opencv-python = "^4.10.0.84"
 dvc = "^3.60.1"
 dvc-ssh = "^4.2.1"
+ruamel-yaml = "^0.18.14"
 
 
 [build-system]
