@@ -14,9 +14,9 @@ DVC (Data Version Control) is a tool that works alongside Git to handle large fi
 
 > **What’s new?**  
 > The pipeline now supports **arbitrary, project-specific class names**.  
-> Define them once in `params.yaml → data.custom_classes` and the code will:
+> Define them once in the beginning with the `setup_project` script and the code will:
 > * rewrite `dataset.yaml` with the right label set  
-> * remap any existing YOLO TXT labels  
+> * use and remap any imported dataset with different formats supported
 > * train & evaluate only on the classes you specify  
 ---
 
