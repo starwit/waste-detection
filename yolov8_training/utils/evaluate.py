@@ -185,8 +185,23 @@ def get_dataset_classes(dataset_yaml_path):
         with open(dataset_yaml_path, "r") as f:
             dataset_config = yaml.safe_load(f)
         
-        class_names = dataset_config.get("names", {})
-        class_ids = list(class_names.keys())
+        names_data = dataset_config.get("names", {})
+        
+        # Check if names is a list or dict and handle accordingly
+        if isinstance(names_data, list):
+            # Convert list to dictionary mapping indices to names
+            class_names = {i: name for i, name in enumerate(names_data)}
+            class_ids = list(range(len(names_data)))
+        elif isinstance(names_data, dict):
+            # Use existing dictionary format
+            class_names = names_data
+            class_ids = list(class_names.keys())
+        else:
+            # Fallback for unexpected format
+            print(f"Warning: Unexpected format for 'names' in {dataset_yaml_path}. Expected list or dict, got {type(names_data)}")
+            class_names = {}
+            class_ids = []
+        
         return class_names, class_ids
     except Exception as e:
         print(f"Warning: Could not read dataset classes from {dataset_yaml_path}: {e}")

@@ -126,7 +126,7 @@ def map_class_names_to_ids(class_names, target_mapping):
     Map class names to target class IDs.
     
     Args:
-        class_names (dict): Source class mapping {id: name}
+        class_names (dict or list): Source class mapping {id: name} or list of names
         target_mapping (dict): Target class mapping {id: name}
         
     Returns:
@@ -135,7 +135,16 @@ def map_class_names_to_ids(class_names, target_mapping):
     mapping = {}
     target_name_to_id = {name.lower(): id for id, name in target_mapping.items()}
     
-    for source_id, source_name in class_names.items():
+    # Normalize class_names to dictionary format
+    if isinstance(class_names, list):
+        class_names_dict = {i: name for i, name in enumerate(class_names)}
+    elif isinstance(class_names, dict):
+        class_names_dict = class_names
+    else:
+        print(f"Warning: Unexpected format for class_names. Expected dict or list, got {type(class_names)}")
+        return mapping
+    
+    for source_id, source_name in class_names_dict.items():
         source_name_lower = source_name.lower()
         if source_name_lower in target_name_to_id:
             mapping[int(source_id)] = target_name_to_id[source_name_lower]
@@ -567,7 +576,12 @@ def process_single_images(
                     
                     if not mapping:
                         print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
-                        print(f"Source classes: {list(yaml_classes.values())}")
+                        # Handle both dict and list formats for displaying source classes
+                        if isinstance(yaml_classes, list):
+                            source_classes = yaml_classes
+                        else:
+                            source_classes = list(yaml_classes.values())
+                        print(f"Source classes: {source_classes}")
                         print(f"Target classes: {list(target_class_mapping.values())}")
                         # Still process the data but labels may be filtered out
                     
