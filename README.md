@@ -12,13 +12,19 @@ DVC (Data Version Control) is a tool that works alongside Git to handle large fi
 - **Reproducibility:** Anyone on the team can get the exact code, data, and model for any version of the project, ensuring that all results are reproducible.
 - **Centralized Storage:** DVC manages uploading and downloading data to a shared remote storage (Hetzner in our case), keeping our Git repository small and fast.
 
+> **What’s new?**  
+> The pipeline now supports **arbitrary, project-specific class names**.  
+> Define them once in the beginning with the `setup_project` script and the code will:
+> * rewrite `dataset.yaml` with the right label set  
+> * use and remap any imported dataset with different formats supported
+> * train & evaluate only on the classes you specify  
 ---
 
 ## Table of Contents
 1. [Initial Project Setup](#initial-project-setup)
 2. [Managing Project Data](#managing-project-data)
 3. [The Experiment Workflow](#the-experiment-workflow)
-4. [Advanced Analysis & Utilities](#advanced-analysis--utilities)
+4. [Custom Class Configuration](#custom-class-configuration)
 5. [Raw Data Structure Guide](#raw-data-structure-guide)
 
 ---
@@ -41,14 +47,19 @@ Follow these steps once to create a new project from this template.
    ```
 
 **4. Run the Interactive Setup Script**
-   A helper script will configure the project's connection to the remote storage. It will prompt for a unique "project name" to ensure data is stored in a dedicated folder.
-   ```bash
-   python scripts/setup_project.py
-   ```
-   This script will:
-   - Prompt for a project name.
-   - Configure the DVC remote path.
-   - Create the `raw_data/train` and `raw_data/test` folders.
+
+A helper script configures the project’s connection to remote storage **and** asks whether you want to specify custom classes.
+
+```bash
+python scripts/setup_project.py
+```
+
+The script will:
+
+* prompt for a project & dataset name  
+* optionally ask for a comma-separated list of class names  
+* patch `.dvc/config` (remote URL) and `params.yaml` accordingly  
+* create the `raw_data/train` and `raw_data/test` folders
 
 **5. Commit the Initial Configuration**
    The bootstrap script modifies configuration files. Commit these changes to save the project setup.
@@ -97,8 +108,31 @@ After the initial setup, follow this process whenever you add or update the raw 
 
 This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
 
-### Step 1: Configure Parameters
-All training parameters are controlled in **`params.yaml`**. Modify this file to define the settings for your next experiment (e.g., model size, image size, epochs).
+### 1  Configure Parameters
+
+All training parameters live in **`params.yaml`**.  
+Key fields:
+
+```yaml
+data:
+  dataset_name: waste-detection
+  experiment_name: waste-detection
+
+  # ↓ Optional — override COCO classes
+  custom_classes:
+    - "waste"
+    - "cigarette"
+  use_coco_classes: false     # fallback to COCO if true/empty
+
+train:
+  model_size: m
+  image_size: 1280
+  epochs: 50
+  batch_size: 8
+```
+
+* If `custom_classes` is non-empty, those names become class 0…n-1.  
+* If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
 
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
@@ -143,23 +177,31 @@ Once you identify a superior experiment, promote it to become the official versi
 
 ---
 
+
 ## Raw Data Structure Guide
 
-Data should be placed in `raw_data/train/` for training/validation sets and `raw_data/test/` for the final test set. The following structures are supported:
+Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
+The importer now accepts **any** of the following:
 
-1.  **CVAT YOLO Export:** Place the entire exported folder (containing `data.yaml`, `images/`, `labels/`, `train.txt`) directly into `raw_data/train/` or `raw_data/test/`.
+| # | Layout | What to do | Notes |
+|---|--------|------------|-------|
+| 1 | **CVAT YOLO export** | Drop the whole export folder (`data.yaml`, `images/`, `labels/`, `train.txt`). | `train.txt` is automatically parsed. |
+| 2 | **Standard YOLO** | Inside a subfolder create `images/` & `labels/`. | Class IDs will be remapped if needed. |
+| 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
+| 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
 
-2.  **Standard YOLO Format:** Create a subfolder (e.g., `my_dataset`) inside `raw_data/train/`. Within that subfolder, place your images in an `images/` directory and corresponding labels in a `labels/` directory.
+> **Tip:** When you use option&nbsp;4 you can bring in public datasets or prior labeling runs “as is”.  
+> The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
-3.  **Scene-Based Structure (Test Set Only):** For scene-specific evaluation, structure your test data into subfolders where each subfolder name represents a scene (e.g., 'Wolfsburg', 'Carmel').
-    *   **Example:**
-        ```
-        raw_data/
-        └── test/
-            ├── WOB-Testset/  # Scene 1
-            │   ├── images/
-            │   └── labels/
-            └── Carmel-Testset/ # Scene 2
-                ├── images/
-                └── labels/
-        ```
+Example scene‑based layout:
+
+```
+raw_data/
+└── test/
+    ├── Wolfsburg/
+    │   ├── images/
+    │   └── labels/
+    └── Carmel/
+        ├── images/
+        └── labels/
+```

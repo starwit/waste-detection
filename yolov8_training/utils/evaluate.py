@@ -53,9 +53,13 @@ def evaluate_and_log_model_results(
     """
     Evaluates the model on the test set, prepares metadata, and appends results to the CSV.
     """
+    # Get class information from dataset
+    dataset_yaml_path = test_path / "dataset.yaml"
+    class_names, class_ids = get_dataset_classes(dataset_yaml_path)
+    
     # Run evaluation on the model
     results = validate_model(
-        model, data=str(test_path / "dataset.yaml"), imgsz=image_size, workers=0
+        model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0
     )
 
     # Prepare metadata
@@ -87,7 +91,7 @@ def evaluate_and_log_model_results(
         try:
             base_model = YOLO(f"yolov8{model_size}.pt")
             base_results = validate_model(
-                base_model, data=str(test_path / "dataset.yaml"), imgsz=image_size, workers=0
+                base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0
             )
             mean_table(base_results, results, model_name, True)
         except Exception as e:
@@ -166,9 +170,58 @@ def save_false_predictions(model, test_path, output_dir, conf_threshold=0.25):
             cv2.imwrite(str(save_path), result_plotted)
 
 
-def calculate_fp_fn_tp(confusion_matrix):
-    classes_to_consider = [2, 5, 7]
-    mask = [i in classes_to_consider for i in range(len(confusion_matrix) - 1)] + [True]
+def get_dataset_classes(dataset_yaml_path):
+    """
+    Get class information from dataset.yaml file.
+    
+    Args:
+        dataset_yaml_path (Path): Path to dataset.yaml file
+        
+    Returns:
+        dict: Class mapping {id: name}
+        list: List of class IDs
+    """
+    try:
+        with open(dataset_yaml_path, "r") as f:
+            dataset_config = yaml.safe_load(f)
+        
+        names_data = dataset_config.get("names", {})
+        
+        # Check if names is a list or dict and handle accordingly
+        if isinstance(names_data, list):
+            # Convert list to dictionary mapping indices to names
+            class_names = {i: name for i, name in enumerate(names_data)}
+            class_ids = list(range(len(names_data)))
+        elif isinstance(names_data, dict):
+            # Use existing dictionary format
+            class_names = names_data
+            class_ids = list(class_names.keys())
+        else:
+            # Fallback for unexpected format
+            print(f"Warning: Unexpected format for 'names' in {dataset_yaml_path}. Expected list or dict, got {type(names_data)}")
+            class_names = {}
+            class_ids = []
+        
+        return class_names, class_ids
+    except Exception as e:
+        print(f"Warning: Could not read dataset classes from {dataset_yaml_path}: {e}")
+        return {}, []
+
+
+def calculate_fp_fn_tp(confusion_matrix, class_ids=None):
+    """
+    Calculate false positives, false negatives, and true positives.
+    
+    Args:
+        confusion_matrix: Confusion matrix from model validation
+        class_ids: List of class IDs to consider (if None, use all classes)
+    """
+    if class_ids is None:
+        # Use all available classes except background
+        class_ids = list(range(len(confusion_matrix) - 1))
+    
+    # Create mask for classes to consider
+    mask = [i in class_ids for i in range(len(confusion_matrix) - 1)] + [True]
     filtered_matrix = confusion_matrix[mask][:, mask]
     fp = filtered_matrix[:-1, -1].sum()
     fn = filtered_matrix[-1, :-1].sum()
@@ -188,9 +241,23 @@ def calculate_additional_metrics(fp, fn, tp):
     return precision, recall, f1_score, fpr
 
 
-def validate_model(model, data, **kwargs):
+def validate_model(model, data, class_ids=None, **kwargs):
+    """
+    Validate model with dynamic class selection.
+    
+    Args:
+        model: YOLO model to validate
+        data: Path to dataset.yaml or dataset configuration
+        class_ids: List of class IDs to validate (if None, validate all classes)
+        **kwargs: Additional validation arguments
+    """
+    # If class_ids is provided, use it; otherwise validate all classes
+    validation_kwargs = kwargs.copy()
+    if class_ids is not None:
+        validation_kwargs["classes"] = class_ids
+    
     metrics = model.val(
-        data=data, classes=[2], verbose=False, save=False, plots=False, **kwargs
+        data=data, verbose=False, save=False, plots=False, **validation_kwargs
     )
     time_taken = float(metrics.speed["inference"])
 
@@ -253,6 +320,9 @@ def calculate_scene_metrics(model, data, **kwargs):
     dataset_path = Path(dataset_config["path"])
     val_images_dir = dataset_path / dataset_config["val"]
     val_labels_dir = val_images_dir.parent / "labels"
+
+    # Get class information
+    class_names, class_ids = get_dataset_classes(data)
 
     # Group images by scene
     scene_images = {}
@@ -346,7 +416,7 @@ def calculate_scene_metrics(model, data, **kwargs):
 
                 scene_results = model.val(
                     data=str(temp_yaml_path),
-                    classes=[2],
+                    classes=class_ids if class_ids else None,
                     verbose=False,
                     save=False,
                     plots=False,

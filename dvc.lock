@@ -1,0 +1,101 @@
+schema: '2.0'
+stages:
+  prepare_data:
+    cmd: "python yolov8_training/train_pipeline.py --stage prepare --dataset-name
+      waste-detection --val-split 0.1 --test-split 0.1 --augment-multiplier 1 --recreate-dataset\n"
+    deps:
+    - path: raw_data/
+      hash: md5
+      md5: d3105e20d15da8e056ebf46a174c9c9e.dir
+      size: 86828367
+      nfiles: 7548
+    - path: yolov8_training/train_pipeline.py
+      hash: md5
+      md5: afcf2bf9c5ebd32c73b8f7b683dd0e5e
+      size: 12119
+    - path: yolov8_training/utils/augmentation.py
+      hash: md5
+      md5: 826b20908fb2b4eff6d467df5e22b5b9
+      size: 4364
+    - path: yolov8_training/utils/data_utils.py
+      hash: md5
+      md5: 896bcb8713e4590a389b18038d496d67
+      size: 26486
+    - path: yolov8_training/utils/find_duplicates.py
+      hash: md5
+      md5: 6a207a42025bf404a6688bbf851c9e7c
+      size: 10491
+    params:
+      params.yaml:
+        data:
+          dataset_name: waste-detection
+          experiment_name: waste-detection
+          custom_classes:
+          - waste
+          - cigarette
+          use_coco_classes: false
+        prepare:
+          val_split: 0.1
+          test_split: 0.1
+          augment_multiplier: 1
+    outs:
+    - path: datasets/waste-detection
+      hash: md5
+      md5: 553d07bc34fa702b5837ba351d48e5dc.dir
+      size: 85027803
+      nfiles: 2986
+  train_and_evaluate:
+    cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
+      --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
+    deps:
+    - path: datasets/waste-detection
+      hash: md5
+      md5: f84b44be1c9bf6660952a55df51b1869.dir
+      size: 85504486
+      nfiles: 2989
+    - path: yolov8_training/train_pipeline.py
+      hash: md5
+      md5: afcf2bf9c5ebd32c73b8f7b683dd0e5e
+      size: 12119
+    - path: yolov8_training/utils/data_utils.py
+      hash: md5
+      md5: 896bcb8713e4590a389b18038d496d67
+      size: 26486
+    - path: yolov8_training/utils/evaluate.py
+      hash: md5
+      md5: 246960eaaf19c5968358e107f52122ca
+      size: 24966
+    - path: yolov8_training/utils/find_duplicates.py
+      hash: md5
+      md5: 6a207a42025bf404a6688bbf851c9e7c
+      size: 10491
+    params:
+      params.yaml:
+        data:
+          dataset_name: waste-detection
+          experiment_name: waste-detection
+          custom_classes:
+          - waste
+          - cigarette
+          use_coco_classes: false
+        prepare.val_split: 0.1
+        train:
+          model_size: m
+          image_size: 1280
+          epochs: 50
+          batch_size: 8
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: 783901720b0047b1d4ae49652a082a88
+      size: 314
+    - path: results_comparison/
+      hash: md5
+      md5: 252e4a42a7e173233e44beace037b0dc.dir
+      size: 1525
+      nfiles: 2
+    - path: runs
+      hash: md5
+      md5: 42626542d85994d9f066ad533672bc5a.dir
+      size: 168902754
+      nfiles: 52

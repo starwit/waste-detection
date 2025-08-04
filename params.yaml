@@ -1,6 +1,16 @@
 data:
   dataset_name: waste-detection
   experiment_name: waste-detection
+  # Custom classes configuration
+  # If custom_classes is defined, it will be used instead of COCO classes
+  # If not defined or empty, the system will fall back to selected COCO classes
+  custom_classes:
+    # Example custom classes (uncomment and modify as needed):
+    - "waste"
+    - "cigarette"
+    # - "organic"
+  # Whether to use COCO classes when custom_classes is not defined
+  use_coco_classes: false
 prepare:
   val_split: 0.1
   test_split: 0.1
@@ -8,5 +18,5 @@ prepare:
 train:
   model_size: m
   image_size: 1280
-  epochs: 1
+  epochs: 50
   batch_size: 8
