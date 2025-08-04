@@ -68,7 +68,7 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
             params["data"]["custom_classes"] = classes
             params["data"]["use_coco_classes"] = False
         else:
-            print("⚠️  No valid classes entered. Falling back to COCO classes.")
+            print("No valid classes entered. Falling back to COCO classes.")
             params["data"].pop("custom_classes", None)
             params["data"]["use_coco_classes"] = True
     else:
