@@ -18,5 +18,5 @@ prepare:
 train:
   model_size: m
   image_size: 1280
-  epochs: 1
+  epochs: 50
   batch_size: 8
