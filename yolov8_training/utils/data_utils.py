@@ -97,18 +97,9 @@ COCO_CLASSES = {
     "toothbrush": 79,
 }
 
-selected_classes = [
-    "person",
-    "bicycle",
-    "car",
-    "motorcycle",
-    "airplane",
-    "bus",
-    "train",
-    "truck",
-]
-
-selected_coco_classes = {i: selected_classes[i] for i in range(len(selected_classes))}
+ALL_COCO_BY_ID = [name for name, _id in sorted(COCO_CLASSES.items(), key=lambda kv: kv[1])]
+selected_classes = ALL_COCO_BY_ID
+selected_coco_classes = {i: cls for i, cls in enumerate(selected_classes)}
 
 
 def get_class_mapping(custom_classes=None, use_coco_classes=True):
