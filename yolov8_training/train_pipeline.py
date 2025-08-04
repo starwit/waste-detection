@@ -34,6 +34,12 @@ def load_class_config():
         if custom_classes:
             custom_classes = [cls for cls in custom_classes if cls]
         
+        if custom_classes and use_coco_classes:
+            raise ValueError(
+                "Both 'custom_classes' and 'use_coco_classes' are set. "
+                "Please choose one strategy."
+            )
+        
         return custom_classes, use_coco_classes
     except Exception as e:
         print(f"Warning: Could not load params.yaml: {e}")
