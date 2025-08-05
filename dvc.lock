@@ -6,25 +6,25 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: d3105e20d15da8e056ebf46a174c9c9e.dir
-      size: 86828367
-      nfiles: 7548
+      md5: 7e0e4c6b0283d578eabeca2f28d77cc4.dir
+      size: 3141547930
+      nfiles: 13595
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: afcf2bf9c5ebd32c73b8f7b683dd0e5e
-      size: 12119
+      md5: 19d63a2f7eb383b7dc384e65c489fb2e
+      size: 12314
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 896bcb8713e4590a389b18038d496d67
-      size: 26486
+      md5: 7b3e05cddbfc6b595f0cbc2d03c25818
+      size: 28534
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: 6a207a42025bf404a6688bbf851c9e7c
-      size: 10491
+      md5: c493dae523e0270f12c2627ba42f1f5b
+      size: 8510
     params:
       params.yaml:
         data:
@@ -41,34 +41,34 @@ stages:
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 553d07bc34fa702b5837ba351d48e5dc.dir
-      size: 85027803
-      nfiles: 2986
+      md5: 5b183f9e613be657091861c431c9349b.dir
+      size: 3137861882
+      nfiles: 13340
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: f84b44be1c9bf6660952a55df51b1869.dir
-      size: 85504486
-      nfiles: 2989
+      md5: 675e57ad2ec20bf9ecccefcd01e59612.dir
+      size: 3140168963
+      nfiles: 13343
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: afcf2bf9c5ebd32c73b8f7b683dd0e5e
-      size: 12119
+      md5: 19d63a2f7eb383b7dc384e65c489fb2e
+      size: 12314
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 896bcb8713e4590a389b18038d496d67
-      size: 26486
+      md5: 7b3e05cddbfc6b595f0cbc2d03c25818
+      size: 28534
     - path: yolov8_training/utils/evaluate.py
       hash: md5
-      md5: 246960eaaf19c5968358e107f52122ca
-      size: 24966
+      md5: 53af6681039135a23a47ccde94dccb6d
+      size: 25569
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: 6a207a42025bf404a6688bbf851c9e7c
-      size: 10491
+      md5: c493dae523e0270f12c2627ba42f1f5b
+      size: 8510
     params:
       params.yaml:
         data:
@@ -87,15 +87,15 @@ stages:
     outs:
     - path: metrics.json
       hash: md5
-      md5: 783901720b0047b1d4ae49652a082a88
-      size: 314
+      md5: 5d741e2fa9b50e7bf44e0b5fcf2f83c4
+      size: 331
     - path: results_comparison/
       hash: md5
-      md5: 252e4a42a7e173233e44beace037b0dc.dir
-      size: 1525
+      md5: 7f7cd7253c674c2277188f5c99792cd0.dir
+      size: 1508
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 42626542d85994d9f066ad533672bc5a.dir
-      size: 168902754
+      md5: 6452c3cf3b3d54b9683c81aee659d541.dir
+      size: 167888407
       nfiles: 52
