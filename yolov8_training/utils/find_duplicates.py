@@ -2,11 +2,11 @@ from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, List, Tuple, Set
-from PIL import Image
-import imagehash
+
 import cv2
+import imagehash
+from PIL import Image
 from skimage.metrics import structural_similarity as ssim
-import itertools
 
 
 class DisjointSet:
@@ -29,7 +29,7 @@ class DisjointSet:
       # C → C
 
       ds.union('A', 'B')  # Now B points to A
-      # A → As
+      # A → A
       # B → A
       # C → C
 
@@ -48,38 +48,52 @@ class DisjointSet:
     def __init__(self):
         self.parent: Dict[Path, Path] = {}
 
-    def find(self, item: Path) -> Path:
-        # If item not yet seen, start its own set
+    # -- core operations -----------------------------------------------------
+
+    def find(self, item):
+        """
+        Find the root/representative element of the set containing 'item'.
+        """
+        # If item isn't in any set yet, create a new set with item as its own parent
         if item not in self.parent:
             self.parent[item] = item
-        # Path‑compression
+        # Path compression
         if self.parent[item] != item:
             self.parent[item] = self.find(self.parent[item])
         return self.parent[item]
 
-    def union(self, a: Path, b: Path) -> None:
-        root_a = self.find(a)
-        root_b = self.find(b)
-        if root_a != root_b:
-            self.parent[root_b] = root_a  # attach b’s tree to a’s
+    def union(self, item1, item2):
+        """
+        Merge the sets containing item1 and item2.
+        After union, both items will be in the same set.
+        """
+        # Find the roots of both items
+        root1 = self.find(item1)
+        root2 = self.find(item2)
+
+        # If items are in different sets (have different roots) merge them
+        # by making root2 point to root1
+        if root1 != root2:
+            self.parent[root2] = root1
 
 
 class DuplicateDetector:
-    """Detect duplicate / near‑duplicate images using a two‑stage test:
+    """Detect duplicate / near-duplicate images using a two-stage pipeline.
 
-    1. Perceptual hash (pHash)  – cheap  – filter by Hamming distance.
-    2. SSIM                    – costly – confirm visual similarity.
+    1. **Perceptual hash (pHash)** – cheap fingerprint; small Hamming distance
+       marks candidates.
+    2. **SSIM** – more expensive pixel-domain metric; confirms similarity.
     """
 
     def __init__(self, phash_threshold: int = 2, ssim_threshold: float = 0.95):
-        self.phash_threshold = phash_threshold
-        self.ssim_threshold = ssim_threshold
+        self.phash_threshold = phash_threshold  # max acceptable Hamming dist
+        self.ssim_threshold = ssim_threshold    # min acceptable SSIM score
 
     # --------------- Hash & similarity helpers ----------------
 
     @staticmethod
     def compute_perceptual_hash(file_path: Path) -> Tuple[Path, str | None]:
-        """Compute perceptual hash. Returns `(path, hash_hex or None)`"""
+        """Compute perceptual hash; return `(path, hash_hex_or_None)`."""
         try:
             with Image.open(file_path) as img:
                 return file_path, str(imagehash.phash(img))
@@ -88,12 +102,12 @@ class DuplicateDetector:
 
     @staticmethod
     def hamming_distance(hash1: int, hash2: int) -> int:
-        """Cheap Hamming distance via XOR + bit_count (Python 3.10+)"""
+        """Cheap Hamming distance via XOR."""
         return (hash1 ^ hash2).bit_count()
 
     @staticmethod
     def compute_ssim(image1_path: Path, image2_path: Path) -> float:
-        """SSIM on 256×256 grayscale – expensive keep to a minimum"""
+        """Compute SSIM on 256×256 grayscale thumbnails."""
         try:
             img1 = cv2.imread(str(image1_path), cv2.IMREAD_GRAYSCALE)
             img2 = cv2.imread(str(image2_path), cv2.IMREAD_GRAYSCALE)
@@ -106,60 +120,48 @@ class DuplicateDetector:
         except Exception:
             return 0.0
 
-    # ------------------- Public API ---------------------------
 
     def find_duplicates(self, image_paths: List[Path]) -> Dict[Path, List[Path]]:
-        """Return `{cluster_root: [img1, img2, …]}` for all dup clusters."""
-
-        # ----------------------------------------------------
-        # 1. Compute pHashes in parallel (releases the GIL)
-        # ----------------------------------------------------
+        """Return `{cluster_root: [img1, img2, …]}` for all duplicate clusters."""
+        # 1. Compute pHashes in parallel (releases GIL)
         with ProcessPoolExecutor() as pool:
             hash_results = list(pool.map(self.compute_perceptual_hash, image_paths))
 
-        # Keep only successful hashes and convert hex‑>int once
+        # Keep successful hashes and convert hex→int once
         int_hashes: List[Tuple[Path, int]] = [
             (path, int(h, 16)) for path, h in hash_results if h is not None
         ]
 
-        n = len(int_hashes)
         ds = DisjointSet()
 
-        # ----------------------------------------------------
-        # 2. All‑pairs comparison (i < j) – exact but optimised
-        #    • bit_count for Hamming distance
-        #    • SSIM only when hashes pass the cheap test
-        # ----------------------------------------------------
+        # 2. Exhaustive pairwise comparison (upper-triangle)
         for idx, (path_i, hash_i) in enumerate(int_hashes):
             for path_j, hash_j in int_hashes[idx + 1 :]:
-                # Cheap filter --------------------------------
+                # cheap candidate filter
                 if self.hamming_distance(hash_i, hash_j) > self.phash_threshold:
-                    continue  # definitely not similar
-
-                # Expensive confirmation ----------------------
+                    continue
+                # expensive confirmation
                 if self.compute_ssim(path_i, path_j) >= self.ssim_threshold:
                     ds.union(path_i, path_j)
 
-        # ----------------------------------------------------
-        # 3. Collect clusters from the DisjointSet
-        # ----------------------------------------------------
+        # 3. Collect clusters
         clusters: Dict[Path, List[Path]] = defaultdict(list)
         for path, _ in int_hashes:
             clusters[ds.find(path)].append(path)
 
-        # Keep only true duplicate groups (len > 1)
+        # keep only duplicate groups
         return {root: imgs for root, imgs in clusters.items() if len(imgs) > 1}
-    
 
     def compare_folders(
         self, folder1: Path, folder2: Path
     ) -> Dict[Path, List[Tuple[Path, float, int]]]:
-        """
-        Compare images between two folders. Returns dict:
-        {image_in_folder1: [(similar_image_in_folder2, ssim, hamming), ...]}
-        """
+        """Compare images between two folders and report similar pairs."""
         def collect_images(folder: Path) -> List[Path]:
-            return list(folder.rglob("*.jpg")) + list(folder.rglob("*.jpeg")) + list(folder.rglob("*.png"))
+            return (
+                list(folder.rglob("*.jpg"))
+                + list(folder.rglob("*.jpeg"))
+                + list(folder.rglob("*.png"))
+            )
 
         folder1_images = collect_images(folder1)
         folder2_images = collect_images(folder2)
@@ -179,31 +181,28 @@ class DuplicateDetector:
                     ssim_score = self.compute_ssim(path1, path2)
                     if ssim_score >= self.ssim_threshold:
                         matches[path1].append((path2, ssim_score, hamming))
-
         return matches
 
     def print_folder_comparison_results(
         self, matches: Dict[Path, List[Tuple[Path, float, int]]]
     ) -> None:
-        """Print the folder comparison results in readable format."""
         if not matches:
             print("\nNo similar images found between the folders.")
             return
-
-        print(f"\nFound similar images between folders:")
-        for i, (source_img, similar_images) in enumerate(matches.items(), start=1):
+        print("\nFound similar images between folders:")
+        for i, (src, sims) in enumerate(matches.items(), start=1):
             print(f"\nImage {i} from source folder:")
-            print(f"  Source: {source_img}")
+            print(f"  Source: {src}")
             print("  Similar images in target folder:")
-            for target_img, ssim_score, hamming_dist in similar_images:
-                print(f"    - {target_img}")
+            for tgt, ssim_score, hamming_dist in sims:
+                print(f"    - {tgt}")
                 print(f"      SSIM: {ssim_score:.3f}, Hamming distance: {hamming_dist}")
 
-    def print_duplicate_clusters(self, clusters: Dict[Path, List[Path]]):
+    def print_duplicate_clusters(self, clusters: Dict[Path, List[Path]]) -> None:
         print(f"\nFound {len(clusters)} duplicate clusters:")
-        for i, (cluster_root, cluster_imgs) in enumerate(clusters.items(), start=1):
+        for i, (root, imgs) in enumerate(clusters.items(), start=1):
             print(f"\nCluster {i}:")
-            for img in cluster_imgs:
+            for img in imgs:
                 print(f"  • {img}")
 
     def get_unique_images(self, image_paths: List[Path]) -> Set[Path]:
