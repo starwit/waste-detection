@@ -388,9 +388,7 @@ def calculate_scene_metrics(model, data, **kwargs):
                 "path": str(temp_path),
                 "train": "images",
                 "val": "images",
-                "nc": dataset_config.get(
-                    "nc", 8
-                ),  # Get nc from original yaml or default
+                "nc": len(dataset_config["names"]),
                 "names": dataset_config["names"],
             }
 
@@ -437,8 +435,8 @@ def calculate_scene_metrics(model, data, **kwargs):
 
         finally:
             # Ensure cleanup happens regardless of success or failure after evaluation is finished
-            if temp_dir and temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            if temp_path.exists():
+                shutil.rmtree(temp_path, ignore_errors=True)
 
     return scene_metrics
 

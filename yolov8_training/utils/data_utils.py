@@ -227,6 +227,9 @@ def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classe
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
     """
+
+    class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+
     # Get all parts of the path
     yaml_dataset_path = dataset_path.absolute()
 
@@ -234,11 +237,10 @@ def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classe
 path: {yaml_dataset_path}
 train: train/images
 val: val/images
+nc: {len(class_mapping)} 
 
 names:
 """
-    
-    class_mapping = get_class_mapping(custom_classes, use_coco_classes)
     for key, value in class_mapping.items():
         yaml_content += f"  {key}: {value}\n"
 
