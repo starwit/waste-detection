@@ -267,6 +267,39 @@ def ensure_equal_files(frames_path, labels_path):
         os.remove(labels_path / label)
 
 
+def _poly_to_bbox_row(row):
+    """row = [cls, x1, y1, x2, y2, …]  (normalised)  →  [cls, xc, yc, w, h]"""
+    cls, pts = int(row[0]), row[1:]
+    xs, ys = pts[0::2], pts[1::2]
+    x1, y1, x2, y2 = max(0, min(xs)), max(0, min(ys)), min(1, max(xs)), min(1, max(ys))
+    xc, yc, w, h = (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1
+    return [cls, xc, yc, w, h]
+
+
+def convert_polygons_to_bboxes_inplace(label_path: Path) -> None:
+    """
+    Re-writes *label_path* if any row contains polygons (≥7 numbers).
+    Works in-place and is idempotent.
+    """
+    with open(label_path) as f:
+        rows = [line.strip().split() for line in f if line.strip()]
+
+    changed = False
+    out = []
+    for r in rows:
+        if len(r) > 5:                               # polygon row
+            r = _poly_to_bbox_row(list(map(float, r)))
+            changed = True
+        else:                                        # already bbox row
+            r = list(map(float, r))                  # Convert to floats
+        out.append(" ".join(f"{v:.6f}" if i else str(int(v))
+                            for i, v in enumerate(r)))
+
+    if changed:                                      # overwrite only if we edited
+        with open(label_path, "w") as f:
+            f.write("\n".join(out) + "\n")
+
+
 def move_images_to_output(
     train_images,
     train_labels,
@@ -499,6 +532,7 @@ def process_single_images(
                             pass
                         empty_label_count += 1
 
+                    convert_polygons_to_bboxes_inplace(label_path)
                     image_label_pairs.append((image_path, label_path, scene_name))
                 else:
                     skip_count += 1
@@ -557,6 +591,7 @@ def process_single_images(
                             pass
                         empty_label_count += 1
 
+                    convert_polygons_to_bboxes_inplace(label_file)
                     temp_pairs.append((image_file, label_file, scene_name))
 
             # Check if this manual structure has a data.yaml for class mapping
