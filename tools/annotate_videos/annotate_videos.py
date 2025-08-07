@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 from ultralytics import YOLO
+from ultralytics.utils.plotting import Annotator
+import zipfile
 
 
 def parse_arguments():
@@ -19,7 +21,7 @@ def parse_arguments():
     )
     parser.add_argument("-i", "--input-dir", required=True, type=Path, help="Input directory containing videos")
     parser.add_argument("-p", "--pattern", default="*.mp4", help="Globbing pattern for video files")
-    parser.add_argument("-o", "--output-dir", required=True, type=Path, help="Output directory for filtered frames")
+    parser.add_argument("-o", "--output-dir", default=Path("./output"), type=Path, help="Output directory for filtered frames")
     parser.add_argument("-c", "--min-count", type=int, default=1, help="Minimum object count threshold")
     parser.add_argument("-w", "--weights", required=True, type=Path, help="Path to YOLO model weights")
     parser.add_argument("-n", "--min-interval", type=int, default=100, help="Minimum frame interval between picks")
@@ -95,24 +97,41 @@ def filter_frames_by_interval(frame_candidates: List[Tuple[int, int]], min_inter
 def save_frame_and_label(frame: np.ndarray, detections: List[Dict], output_dir: Path, filename: str):
     """Save frame as JPG and detections in YOLO format."""
     # Save frame
-    frame_path = output_dir / 'images' / f"{filename}.jpg"
+    frame_path = output_dir / 'images' / 'train' / f"{filename}.jpg"
     cv2.imwrite(str(frame_path), frame)
+
+    # Use ultralytics annotation tool to also save annotated frames into separate directory
+    annotated_frame_path = output_dir / 'annotated_images' / f"{filename}.jpg"
+    annotated_frame = frame.copy()
+    annotator = Annotator(annotated_frame, line_width=2, example=None, font_size=24)
+    for det in detections:
+        # bbox is [x_center, y_center, width, height] normalized
+        h, w = frame.shape[:2]
+        x_c, y_c, bw, bh = det['bbox']
+        # Convert normalized xywh to pixel xyxy
+        x1 = int((x_c - bw / 2) * w)
+        y1 = int((y_c - bh / 2) * h)
+        x2 = int((x_c + bw / 2) * w)
+        y2 = int((y_c + bh / 2) * h)
+        label = f"{det['class_id']}, {det['confidence']:.2f}"
+        annotator.box_label([x1, y1, x2, y2], label, color=(0,0,255))
+    annotated_frame = annotator.result()
+    cv2.imwrite(str(annotated_frame_path), annotated_frame)
     
     # Save label
-    label_path = output_dir / 'labels' / f"{filename}.txt"
+    label_path = output_dir / 'labels' / 'train' / f"{filename}.txt"
     with open(label_path, 'w') as f:
         for det in detections:
             bbox = det['bbox']
             f.write(f"{det['class_id']} {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}\n")
 
 
-def create_histogram(object_counts: List[int], output_file: Path, title: str):
+def create_histogram(values: List[float], output_file: Path, title: str, x_label: str):
     """Create and save histogram of object count distribution."""
     plt.figure(figsize=(10, 6))
-    plt.hist(object_counts, bins=max(object_counts) + 1 if object_counts else 1, 
-             range=(0, max(object_counts) + 1) if object_counts else (0, 1), 
+    plt.hist(values, bins='auto', 
              edgecolor='black', alpha=0.7)
-    plt.xlabel('Object Count')
+    plt.xlabel(x_label)
     plt.ylabel('Frequency')
     plt.title(title)
     plt.grid(True, alpha=0.3)
@@ -120,19 +139,21 @@ def create_histogram(object_counts: List[int], output_file: Path, title: str):
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     plt.close()
 
-def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[int]]:
-    """Process a single video file and return object counts of selected frames and all frames."""
+def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[int], List[float]]:
+    """Process a single video file and return object counts of selected frames, all frames, and all confidence values."""
     print(f"Processing video: {video_path}")
     
     video_name = video_path.stem
     selected_frame_counts = []
     all_frame_counts = []
+    all_frame_confidences = []
     last_selected_frame = -args.min_interval  # Initialize to allow first frame selection
     
     for frame_idx, frame in extract_frames_from_video(video_path):
         detections = run_inference(model, frame, args.min_confidence)
         object_count = len(detections)
         all_frame_counts.append(object_count)
+        all_frame_confidences.extend([det['confidence'] for det in detections])
         
         # Check if frame meets criteria and interval requirement
         if (object_count >= args.min_count and 
@@ -144,15 +165,16 @@ def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[
             last_selected_frame = frame_idx
     
     print(f"Selected {len(selected_frame_counts)} frames")
-    return selected_frame_counts, all_frame_counts
+    return selected_frame_counts, all_frame_counts, all_frame_confidences
 
 def main():
     """Main function."""
     args = parse_arguments()
     
     # Create output directories
-    (args.output_dir / 'images').mkdir(parents=True, exist_ok=True)
-    (args.output_dir / 'labels').mkdir(parents=True, exist_ok=True)
+    (args.output_dir / 'images' / 'train').mkdir(parents=True, exist_ok=True)
+    (args.output_dir / 'labels' / 'train').mkdir(parents=True, exist_ok=True)
+    (args.output_dir / 'annotated_images').mkdir(parents=True, exist_ok=True)
     
     # Load YOLO model
     print(f"Loading YOLO model from {args.weights}")
@@ -170,10 +192,13 @@ def main():
     # Process all videos
     all_object_counts = []
     all_frame_counts = []
+    all_frame_confidences = []
+
     for video_file in video_files:
-        selected_counts, all_counts = process_video(video_file, model, args)
+        selected_counts, all_counts, all_confidences = process_video(video_file, model, args)
         all_object_counts.extend(selected_counts)
         all_frame_counts.extend(all_counts)
+        all_frame_confidences.extend(all_confidences)
 
     # Create data.yaml in output directory to make it a valid YOLO dataset
     data_yaml_content = dedent("""\
@@ -185,18 +210,38 @@ def main():
     data_yaml_path = args.output_dir / 'data.yaml'
     with open(data_yaml_path, 'w') as f:
         f.write(data_yaml_content)
+
+    zip_path = args.output_dir / 'dataset.zip'
+    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_STORED) as zipf:
+        # Add data.yaml
+        zipf.write(data_yaml_path, arcname='data.yaml')
+        # Add images directory
+        images_dir = args.output_dir / 'images'
+        for file in images_dir.rglob('*'):
+            if file.is_file():
+                zipf.write(file, arcname=file.relative_to(args.output_dir))
+        # Add labels directory
+        labels_dir = args.output_dir / 'labels'
+        for file in labels_dir.rglob('*'):
+            if file.is_file():
+                zipf.write(file, arcname=file.relative_to(args.output_dir))
+    print(f"Created dataset archive at {zip_path}")
     
     # Create histograms
     if all_object_counts:
-        create_histogram(all_object_counts, args.output_dir / 'object_count_histogram_selected.png', title='Distribution of Object Counts in Selected Frames')
+        create_histogram(all_object_counts, args.output_dir / 'object_count_histogram_selected.png', title='Distribution of Object Counts in Selected Frames', x_label='Object Count')
         print(f"Saved {len(all_object_counts)} frames total")
         print(f"Selected frames object count statistics: min={min(all_object_counts)}, max={max(all_object_counts)}, avg={np.mean(all_object_counts):.2f}")
     else:
         print("No frames met the criteria")
     
     if all_frame_counts:
-        create_histogram(all_frame_counts, args.output_dir / 'object_count_histogram_all.png', title='Distribution of Object Counts in All Frames')
+        create_histogram(all_frame_counts, args.output_dir / 'object_count_histogram_all.png', title='Distribution of Object Counts in All Frames', x_label='Object Count')
         print(f"All frames object count statistics: min={min(all_frame_counts)}, max={max(all_frame_counts)}, avg={np.mean(all_frame_counts):.2f}")
+
+    if all_frame_confidences:
+        create_histogram(all_frame_confidences, args.output_dir / 'confidence_histogram_all.png', title='Distribution of Detection Confidence', x_label='Confidence')
+        print(f"All frames confidence statistics: min={min(all_frame_confidences)}, max={max(all_frame_confidences)}, avg={np.mean(all_frame_confidences):.2f}")
     
     # Save processing summary
     summary = {
