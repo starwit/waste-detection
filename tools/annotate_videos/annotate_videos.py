@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 from textwrap import dedent
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, NamedTuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -11,6 +11,11 @@ from tqdm import tqdm
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator
 import zipfile
+import itertools
+
+class FrameStats(NamedTuple):
+    detection_count: int
+    confidences: List[float]
 
 
 def parse_arguments():
@@ -125,6 +130,20 @@ def save_frame_and_label(frame: np.ndarray, detections: List[Dict], output_dir: 
             bbox = det['bbox']
             f.write(f"{det['class_id']} {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}\n")
 
+def create_2d_histogram(values: List[Tuple[float, float]], output_file: Path, title: str, x_label: str, y_label: str):
+    """Create and save a 2D histogram from a list of (x, y) values."""
+    if not values:
+        print("No values provided for 2D histogram.")
+        return
+    x_vals, y_vals = [v[0] for v in values], [v[1] for v in values]
+    plt.figure(figsize=(10, 8))
+    plt.hist2d(x_vals, y_vals, bins=(max(x_vals) - min(x_vals) + 1, 10), range=[[min(x_vals), max(x_vals) + 1], [0, 1]], cmap='Blues')
+    plt.colorbar(label='Frequency')
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title(title)
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.close()
 
 def create_histogram(values: List[float], output_file: Path, title: str, x_label: str):
     """Create and save histogram of object count distribution."""
@@ -139,21 +158,20 @@ def create_histogram(values: List[float], output_file: Path, title: str, x_label
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     plt.close()
 
-def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[int], List[float]]:
+def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[FrameStats]]:
     """Process a single video file and return object counts of selected frames, all frames, and all confidence values."""
     print(f"Processing video: {video_path}")
     
     video_name = video_path.stem
-    selected_frame_counts = []
-    all_frame_counts = []
-    all_frame_confidences = []
+    selected_frame_stats: List[FrameStats] = []
+    all_frame_stats: List[FrameStats] = []
     last_selected_frame = -args.min_interval  # Initialize to allow first frame selection
     
     for frame_idx, frame in extract_frames_from_video(video_path):
         detections = run_inference(model, frame, args.min_confidence)
         object_count = len(detections)
-        all_frame_counts.append(object_count)
-        all_frame_confidences.extend([det['confidence'] for det in detections])
+        stats = FrameStats(object_count, [det['confidence'] for det in detections])
+        all_frame_stats.append(stats)
         
         # Check if frame meets criteria and interval requirement
         if (object_count >= args.min_count and 
@@ -161,11 +179,11 @@ def process_video(video_path: Path, model: YOLO, args) -> Tuple[List[int], List[
             
             filename = f"{video_name}_frame_{frame_idx:06d}"
             save_frame_and_label(frame, detections, args.output_dir, filename)
-            selected_frame_counts.append(object_count)
+            selected_frame_stats.append(stats)
             last_selected_frame = frame_idx
     
-    print(f"Selected {len(selected_frame_counts)} frames")
-    return selected_frame_counts, all_frame_counts, all_frame_confidences
+    print(f"Selected {len(selected_frame_stats)} frames")
+    return selected_frame_stats, all_frame_stats
 
 def main():
     """Main function."""
@@ -190,15 +208,13 @@ def main():
         return
     
     # Process all videos
-    all_object_counts = []
-    all_frame_counts = []
-    all_frame_confidences = []
+    all_frame_stats: List[FrameStats] = []
+    selected_frame_stats: List[FrameStats] = []
 
     for video_file in video_files:
-        selected_counts, all_counts, all_confidences = process_video(video_file, model, args)
-        all_object_counts.extend(selected_counts)
-        all_frame_counts.extend(all_counts)
-        all_frame_confidences.extend(all_confidences)
+        selected_stats, all_stats = process_video(video_file, model, args)
+        selected_frame_stats.extend(selected_stats)
+        all_frame_stats.extend(all_stats)
 
     # Create data.yaml in output directory to make it a valid YOLO dataset
     data_yaml_content = dedent("""\
@@ -228,26 +244,30 @@ def main():
     print(f"Created dataset archive at {zip_path}")
     
     # Create histograms
-    if all_object_counts:
-        create_histogram(all_object_counts, args.output_dir / 'object_count_histogram_selected.png', title='Distribution of Object Counts in Selected Frames', x_label='Object Count')
-        print(f"Saved {len(all_object_counts)} frames total")
-        print(f"Selected frames object count statistics: min={min(all_object_counts)}, max={max(all_object_counts)}, avg={np.mean(all_object_counts):.2f}")
+    if selected_frame_stats:
+        detection_counts = [s.detection_count for s in selected_frame_stats]
+        create_histogram(detection_counts, args.output_dir / 'object_count_histogram_selected.png', title='Distribution of Object Counts in Selected Frames', x_label='Object Count')
+        print(f"Saved {len(detection_counts)} frames total")
+        print(f"Selected frames object count statistics: min={min(detection_counts)}, max={max(detection_counts)}, avg={np.mean(detection_counts):.2f}")
     else:
         print("No frames met the criteria")
     
-    if all_frame_counts:
-        create_histogram(all_frame_counts, args.output_dir / 'object_count_histogram_all.png', title='Distribution of Object Counts in All Frames', x_label='Object Count')
-        print(f"All frames object count statistics: min={min(all_frame_counts)}, max={max(all_frame_counts)}, avg={np.mean(all_frame_counts):.2f}")
+    if all_frame_stats:
+        detection_counts = [s.detection_count for s in all_frame_stats]
+        confidences = list(itertools.chain.from_iterable([s.confidences for s in all_frame_stats]))
+        create_histogram(detection_counts, args.output_dir / 'object_count_histogram_all.png', title='Distribution of Object Counts in All Frames', x_label='Object Count')
+        create_histogram(confidences, args.output_dir / 'confidence_histogram_all.png', title='Distribution of Detection Confidence', x_label='Confidence')
+        counts_confidences = [(s.detection_count, conf) for s in all_frame_stats for conf in s.confidences]
+        create_2d_histogram(counts_confidences, args.output_dir / 'count_confidences_histogram_all.png', title='Count vs Confidence', x_label='Frame with count', y_label='Confidences')
+        print(f"All frames object count statistics: min={min(detection_counts)}, max={max(detection_counts)}, avg={np.mean(detection_counts):.2f}")
+        print(f"All frames confidence statistics: min={min(confidences)}, max={max(confidences)}, avg={np.mean(confidences):.2f}")
 
-    if all_frame_confidences:
-        create_histogram(all_frame_confidences, args.output_dir / 'confidence_histogram_all.png', title='Distribution of Detection Confidence', x_label='Confidence')
-        print(f"All frames confidence statistics: min={min(all_frame_confidences)}, max={max(all_frame_confidences)}, avg={np.mean(all_frame_confidences):.2f}")
     
     # Save processing summary
     summary = {
         'total_videos': len(video_files),
-        'total_frames_processed': len(all_frame_counts),
-        'total_frames_saved': len(all_object_counts),
+        'total_frames_processed': len(all_frame_stats),
+        'total_frames_saved': len(selected_frame_stats),
         'min_count_threshold': args.min_count,
         'min_interval': args.min_interval,
     }
