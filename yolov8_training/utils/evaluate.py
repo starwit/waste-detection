@@ -91,7 +91,7 @@ def evaluate_and_log_model_results(
         try:
             base_model = YOLO(f"yolov8{model_size}.pt")
             base_results = validate_model(
-                base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0
+                base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0, write_json=False
             )
             mean_table(base_results, results, model_name, True)
         except Exception as e:
@@ -241,7 +241,7 @@ def calculate_additional_metrics(fp, fn, tp):
     return precision, recall, f1_score, fpr
 
 
-def validate_model(model, data, class_ids=None, **kwargs):
+def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     """
     Validate model with dynamic class selection.
     
@@ -249,6 +249,7 @@ def validate_model(model, data, class_ids=None, **kwargs):
         model: YOLO model to validate
         data: Path to dataset.yaml or dataset configuration
         class_ids: List of class IDs to validate (if None, validate all classes)
+        write_json: Whether to write metrics.json
         **kwargs: Additional validation arguments
     """
     # If class_ids is provided, use it; otherwise validate all classes
@@ -291,8 +292,9 @@ def validate_model(model, data, class_ids=None, **kwargs):
     scene_metrics = calculate_scene_metrics(model, data, **kwargs)
     metrics_dict.update(scene_metrics)
 
-    with open("metrics.json", "w") as f:
-        json.dump(metrics_dict, f, indent=4)
+    if write_json:
+        with open("metrics.json", "w") as f:
+            json.dump(metrics_dict, f, indent=4)
 
     return metrics_dict
 
