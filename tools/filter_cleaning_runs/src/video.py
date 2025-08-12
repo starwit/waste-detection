@@ -3,6 +3,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 
 def extract_video_segment(video_file: Path, output_file: Path, 
@@ -42,6 +43,6 @@ def parse_video_timestamp(filename: str) -> Optional[datetime]:
     
     timestamp_str = match.group(1)
     try:        
-        return datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S').replace(tzinfo=None)
+        return datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S').replace(tzinfo=ZoneInfo("Europe/Berlin"))
     except ValueError:
         return None

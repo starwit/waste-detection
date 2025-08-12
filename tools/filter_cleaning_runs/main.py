@@ -126,7 +126,7 @@ def main():
         if args.classifier_weights:
             print(f"  Running cleaning classifier")
             classifier_output = run_cleaning_classifier(video_file, video_start, args.classifier_weights, args.classifier_stride_sec, args.classifier_debounce_interval, args.classifier_threshold)
-            classifier_segments = find_cleaning_segments_classifier(classifier_output)
+            classifier_segments = find_cleaning_segments_classifier(classifier_output, args.min_duration)
             print(f"  Visual classification found {len(classifier_segments)} cleaning segments. Merging GPS segments.")
             segments = intersect_segments(classifier_segments, segments)
 
