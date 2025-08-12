@@ -205,3 +205,44 @@ def find_cleaning_segments_gps(gps_points: List[GPSPoint],
                 ))
     
     return segments
+
+
+def extract_gps_segment(gps_file: Path, output_file: Path, 
+                       start_time: datetime, end_time: datetime) -> bool:
+    """Extract GPS segment and save to new file."""
+    try:
+        with open(gps_file, 'r') as infile:
+            lines = infile.readlines()
+        
+        # Extract only the lines corresponding to the segment indices
+        extracted_lines = []
+        line_count = 0
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if this line contains a valid GPS point
+            parts = line.split(';', 1)
+            if len(parts) == 2:
+                try:
+                    timestamp_str, nmea_msg = parts
+                    timestamp = datetime.fromisoformat(timestamp_str)
+                    msg = parse_nmea_gga(nmea_msg)
+                    
+                    if msg is not None and msg['quality'] > 0:
+                        if start_time <= timestamp <= end_time:
+                            extracted_lines.append(line + '\n')
+                        line_count += 1
+                except Exception:
+                    continue
+        
+        # Write extracted lines to output file
+        with open(output_file, 'w') as outfile:
+            outfile.writelines(extracted_lines)
+            
+        return len(extracted_lines) > 0
+        
+    except Exception:
+        return False
