@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
+from tqdm import tqdm
 
 import cv2
 from src.types import ClassifierStatus, CleaningSegment
@@ -16,13 +17,13 @@ def run_cleaning_classifier(video_file: Path, video_start: datetime, weights: Pa
         cap = cv2.VideoCapture()
         cap.open(str(video_file))
         video_fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_interval = 1 / video_fps
+        video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     except Exception as e:
         raise IOError('Could not open video', e)
     finally:
         cap.release()
 
-    stable_interval_len = 0
+    total_frames_to_process = (video_frame_count / video_fps) / stride_sec
 
     # Initialize YOLO model
     model = YOLO(model=weights)
@@ -31,23 +32,20 @@ def run_cleaning_classifier(video_file: Path, video_start: datetime, weights: Pa
     if cleaning_class_id is None:
         raise ValueError('Model does not have class named `cleaning`')
     
+    stable_interval_len = 0
     prev_cleaning = False
 
-    print(f"Video stride: {int(stride_sec *video_fps)}")
-
     # Iterate over video frames and run cleaning classification model on it
-    for idx, result in enumerate(model.predict(source=str(video_file), vid_stride=int(stride_sec * video_fps), stream=True, verbose=False)):
+    for idx, result in enumerate(tqdm(model.predict(source=str(video_file), vid_stride=int(stride_sec * video_fps), stream=True, verbose=False), total=total_frames_to_process)):
         p = result.probs
         frame_timestamp = video_start + timedelta(seconds=idx * stride_sec)
 
         # Assume (and add) non cleaning or cleanung status based on conditions
-        print(f"{idx:05d} {p.top1} {float(p.top1conf):.2f}")
         cleaning_detected = p.top1 == cleaning_class_id and p.top1conf >= threshold
         if cleaning_detected:
             if prev_cleaning == False:
                 stable_interval_len = 0
             elif prev_cleaning == True and stable_interval_len >= debounce_interval:
-                print(f"{timedelta(seconds=idx * stride_sec)}: CLEANING")
                 visual_cleaning_status.append(ClassifierStatus(
                     is_cleaning=True,
                     timestamp=frame_timestamp,
@@ -58,7 +56,6 @@ def run_cleaning_classifier(video_file: Path, video_start: datetime, weights: Pa
             if prev_cleaning == True:
                 stable_interval_len = 0
             elif prev_cleaning == False and stable_interval_len >= debounce_interval:
-                print(f"{timedelta(seconds=idx * stride_sec)}: NOT CLEANING")
                 visual_cleaning_status.append(ClassifierStatus(
                     is_cleaning=False,
                     timestamp=frame_timestamp,
