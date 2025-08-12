@@ -73,9 +73,10 @@ def parse_gps_log(gps_file: Path) -> List[GPSPoint]:
                     gps_points.append(GPSPoint(
                         timestamp=timestamp,
                         lat=float(msg['lat']),
-                        lon=float(msg['lon'])
+                        lon=float(msg['lon']),
+                        speed_kmh=None
                     ))
-            except Exception:
+            except Exception as e:
                 continue  # Skip invalid lines
                 
     return gps_points
