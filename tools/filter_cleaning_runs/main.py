@@ -42,12 +42,12 @@ def intersect_segments(segments_a: List[CleaningSegment], segments_b: List[Clean
 
     for a in segments_a:
         for b in segments_b:
-            start = max(a.start_time, b.start_time)
-            end = min(a.end_time, b.end_time)
+            start = max(a.start_offset, b.start_offset)
+            end = min(a.end_offset, b.end_offset)
             if (end-start).total_seconds() > 0:
                 filtered_segments.append(CleaningSegment(
-                    start_time=start,
-                    end_time=end
+                    start_offset=start,
+                    end_offset=end,
                 ))
             
     return filtered_segments
@@ -112,11 +112,6 @@ def main():
         # Calculate speeds
         gps_points = calculate_speeds(gps_points, args.gps_speed_window_size)
 
-        video_start = parse_video_timestamp(video_file.name)
-        if video_start is None:
-            print(f"  Could not parse timestamp from filename")
-            continue
-
         # Find cleaning segments using GPS data
         segments: List[CleaningSegment] = find_cleaning_segments_gps(gps_points, args.gps_max_speed, 
                                         args.min_duration, args.gps_min_distance, facility_area)
@@ -125,7 +120,7 @@ def main():
         # Find cleaning segments using a visual classifier (i.e. is equipment active)
         if args.classifier_weights:
             print(f"  Running cleaning classifier")
-            classifier_output = run_cleaning_classifier(video_file, video_start, args.classifier_weights, args.classifier_stride_sec, args.classifier_debounce_interval, args.classifier_threshold)
+            classifier_output = run_cleaning_classifier(video_file, args.classifier_weights, args.classifier_stride_sec, args.classifier_debounce_interval, args.classifier_threshold)
             classifier_segments = find_cleaning_segments_classifier(classifier_output, args.min_duration)
             print(f"  Visual classification found {len(classifier_segments)} cleaning segments. Merging GPS segments.")
             segments = intersect_segments(classifier_segments, segments)
@@ -133,7 +128,6 @@ def main():
         print(f"  Found {len(segments)} cleaning segments")
         
         # Extract video and GPS segments
-        video_start_time = gps_points[0].timestamp
         for i, segment in enumerate(segments):
             # Video segment
             video_output_name = f"{video_file.stem}_segment_{i:03d}{video_file.suffix}"
@@ -143,15 +137,12 @@ def main():
             gps_output_name = f"{gps_file.stem}_segment_{i:03d}.log"
             gps_output_file = args.output_dir / gps_output_name
             
-            video_success = extract_video_segment(video_file, video_output_file, 
-                                                 segment.start_time, segment.end_time,
-                                                 video_start_time)
+            video_success = extract_video_segment(video_file, video_output_file, segment)
             
-            gps_success = extract_gps_segment(gps_file, gps_output_file,
-                                            segment.start_time, segment.end_time)
+            gps_success = extract_gps_segment(gps_file, gps_output_file, segment)
             
             if video_success and gps_success:
-                duration = (segment.end_time - segment.start_time).total_seconds()
+                duration = (segment.end_offset - segment.start_offset).total_seconds()
                 print(f"    Extracted segment {i+1}: {duration:.1f}s -> {video_output_name}, {gps_output_name}")
                 total_segments += 1
             else:

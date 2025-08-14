@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from .types import CleaningSegment
 
-def extract_video_segment(video_file: Path, output_file: Path, 
-                         start_time: datetime, end_time: datetime,
-                         video_start_time: datetime) -> bool:
+
+def extract_video_segment(video_file: Path, output_file: Path, segment: CleaningSegment) -> bool:
     """Extract video segment using ffmpeg."""
     # Calculate relative timestamps
-    start_offset = (start_time - video_start_time).total_seconds()
-    duration = (end_time - start_time).total_seconds()
+    start_offset = segment.start_offset.total_seconds()
+    duration = (segment.end_offset - segment.start_offset).total_seconds()
     
     if start_offset < 0 or duration <= 0:
         return False

@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NamedTuple, Tuple
 
 
 class GPSPoint(NamedTuple):
     timestamp: datetime
+    offset: timedelta
     speed_kmh: float
     lat: float
     lon: float
@@ -15,10 +16,10 @@ class FacilityArea(NamedTuple):
 
 
 class ClassifierStatus(NamedTuple):
-    timestamp: datetime
+    offset: timedelta
     is_cleaning: bool
 
 
 class CleaningSegment(NamedTuple):
-    start_time: datetime
-    end_time: datetime
+    start_offset: timedelta
+    end_offset: timedelta

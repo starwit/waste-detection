@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -47,6 +47,7 @@ def parse_nmea_gga(nmea_str):
 def parse_gps_log(gps_file: Path) -> List[GPSPoint]:
     """Parse GPS log file and extract GGA messages with coordinates and timestamps."""
     gps_points = []
+    start_timestamp = None
     
     with open(gps_file, 'r') as f:
         for line in f:
@@ -64,6 +65,9 @@ def parse_gps_log(gps_file: Path) -> List[GPSPoint]:
             try:
                 # Parse timestamp
                 timestamp = datetime.fromisoformat(timestamp_str)
+
+                if start_timestamp is None:
+                    start_timestamp = timestamp
                 
                 # Parse NMEA message
                 msg = parse_nmea_gga(nmea_msg)
@@ -71,6 +75,7 @@ def parse_gps_log(gps_file: Path) -> List[GPSPoint]:
                 # Only process GGA messages with valid fix
                 if msg is not None and msg['quality'] > 0:
                     gps_points.append(GPSPoint(
+                        offset=timestamp - start_timestamp,
                         timestamp=timestamp,
                         lat=float(msg['lat']),
                         lon=float(msg['lon']),
@@ -171,8 +176,8 @@ def find_cleaning_segments_gps(gps_points: List[GPSPoint],
                     max_distance = calculate_segment_max_distance(gps_points, current_start, i-1)
                     if max_distance >= min_distance:
                         segments.append(CleaningSegment(
-                            start_time=gps_points[current_start].timestamp,
-                            end_time=gps_points[i-1].timestamp,
+                            start_offset=gps_points[current_start].offset,
+                            end_offset=gps_points[i-1].offset,
                         ))
                 current_start = None
             continue
@@ -189,8 +194,8 @@ def find_cleaning_segments_gps(gps_points: List[GPSPoint],
                     max_distance = calculate_segment_max_distance(gps_points, current_start, i-1)
                     if max_distance >= min_distance:
                         segments.append(CleaningSegment(
-                            start_time=gps_points[current_start].timestamp,
-                            end_time=gps_points[i-1].timestamp,
+                            start_offset=gps_points[current_start].offset,
+                            end_offset=gps_points[i-1].offset,
                         ))
                 current_start = None
     
@@ -201,15 +206,14 @@ def find_cleaning_segments_gps(gps_points: List[GPSPoint],
             max_distance = calculate_segment_max_distance(gps_points, current_start, len(gps_points)-1)
             if max_distance >= min_distance:
                 segments.append(CleaningSegment(
-                    start_time=gps_points[current_start].timestamp,
-                    end_time=gps_points[-1].timestamp,
+                    start_offset=gps_points[current_start].offset,
+                    end_offset=gps_points[-1].offset,
                 ))
     
     return segments
 
 
-def extract_gps_segment(gps_file: Path, output_file: Path, 
-                       start_time: datetime, end_time: datetime) -> bool:
+def extract_gps_segment(gps_file: Path, output_file: Path, segment: CleaningSegment) -> bool:
     """Extract GPS segment and save to new file."""
     try:
         with open(gps_file, 'r') as infile:
@@ -217,7 +221,8 @@ def extract_gps_segment(gps_file: Path, output_file: Path,
         
         # Extract only the lines corresponding to the segment indices
         extracted_lines = []
-        line_count = 0
+
+        start_timestamp = None
         
         for line in lines:
             line = line.strip()
@@ -231,11 +236,15 @@ def extract_gps_segment(gps_file: Path, output_file: Path,
                     timestamp_str, nmea_msg = parts
                     timestamp = datetime.fromisoformat(timestamp_str)
                     msg = parse_nmea_gga(nmea_msg)
+
+                    if start_timestamp is None:
+                        start_timestamp = timestamp
+
+                    current_offset = timestamp - start_timestamp
                     
                     if msg is not None and msg['quality'] > 0:
-                        if start_time <= timestamp <= end_time:
+                        if segment.start_offset <= current_offset <= segment.end_offset:
                             extracted_lines.append(line + '\n')
-                        line_count += 1
                 except Exception:
                     continue
         
