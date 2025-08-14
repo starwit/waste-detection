@@ -37,14 +37,14 @@ def parse_facility_area(area_str: str) -> FacilityArea:
     return FacilityArea((coords[0], coords[1]), (coords[2], coords[3]))
 
 
-def intersect_segments(segments_a: List[CleaningSegment], segments_b: List[CleaningSegment]) -> List[CleaningSegment]:
+def intersect_segments(segments_a: List[CleaningSegment], segments_b: List[CleaningSegment], min_duration: int) -> List[CleaningSegment]:
     filtered_segments: List[CleaningSegment] = []
 
     for a in segments_a:
         for b in segments_b:
             start = max(a.start_offset, b.start_offset)
             end = min(a.end_offset, b.end_offset)
-            if (end-start).total_seconds() > 0:
+            if (end-start).total_seconds() >= min_duration:
                 filtered_segments.append(CleaningSegment(
                     start_offset=start,
                     end_offset=end,
@@ -65,8 +65,8 @@ def main():
                         help='Stride for classifier in seconds (default: 1)')
     parser.add_argument('--classifier-threshold', type=float, default=0.9,
                         help='Threshold for classifier to consider a segment as cleaning (default: 0.9)')
-    parser.add_argument('--classifier-debounce-interval', type=int, default=3,
-                        help='How many consecutive "cleaning" results are required (default: 3)')
+    parser.add_argument('--classifier-debounce-interval', type=int, default=5,
+                        help='How many consecutive "cleaning" results are required (default: 5)')
     parser.add_argument('--gps-max-speed', type=float, default=20.0, 
                         help='Maximum speed (km/h) for cleaning activity (default: 20.0)')
     parser.add_argument('--gps-min-distance', type=float, default=20.0,
@@ -123,7 +123,7 @@ def main():
             classifier_output = run_cleaning_classifier(video_file, args.classifier_weights, args.classifier_stride_sec, args.classifier_debounce_interval, args.classifier_threshold)
             classifier_segments = find_cleaning_segments_classifier(classifier_output, args.min_duration)
             print(f"  Visual classification found {len(classifier_segments)} cleaning segments. Merging GPS segments.")
-            segments = intersect_segments(classifier_segments, segments)
+            segments = intersect_segments(classifier_segments, segments, args.min_duration)
 
         print(f"  Found {len(segments)} cleaning segments")
         
