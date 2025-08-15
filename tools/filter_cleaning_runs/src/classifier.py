@@ -23,7 +23,7 @@ def run_cleaning_classifier(video_file: Path, weights: Path, stride_sec: int, de
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         total_frames_to_process = int((video_frame_count / video_fps) / stride_sec)
-        stride = stride_sec * video_fps
+        stride = int(stride_sec * video_fps)
 
         if not cap.isOpened():
             raise IOError('Could not open video')
@@ -38,7 +38,7 @@ def run_cleaning_classifier(video_file: Path, weights: Path, stride_sec: int, de
         stable_interval_len = 0
         prev_cleaning = False
 
-        pbar = tqdm(total=total_frames_to_process)
+        pbar = tqdm(total=total_frames_to_process if total_frames_to_process > 0 else None)
         frame_idx = 0
         frames_processed_count = 0
         while True:
