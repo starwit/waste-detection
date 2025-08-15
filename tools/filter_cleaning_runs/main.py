@@ -57,8 +57,8 @@ def main():
     parser = argparse.ArgumentParser(description='Filter cleaning runs from street cleaner videos')
     parser.add_argument('input_dir', type=Path, help='Directory containing video and GPS files')
     parser.add_argument('output_dir', type=Path, help='Output directory for filtered video segments')
-    parser.add_argument('--min-duration', type=int, default=120,
-                        help='Minimum duration (seconds) for cleaning segments (default: 120)')
+    parser.add_argument('--min-duration', type=int, default=60,
+                        help='Minimum duration (seconds) for cleaning segments (default: 60)')
     parser.add_argument('--classifier-weights', type=Path, 
                         help='Weights for cleaning run classifier (needs to output classes [notcleaning, cleaning])')
     parser.add_argument('--classifier-stride-sec', type=int, default=1,
