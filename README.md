@@ -12,12 +12,10 @@ DVC (Data Version Control) is a tool that works alongside Git to handle large fi
 - **Reproducibility:** Anyone on the team can get the exact code, data, and model for any version of the project, ensuring that all results are reproducible.
 - **Centralized Storage:** DVC manages uploading and downloading data to a shared remote storage (Hetzner in our case), keeping our Git repository small and fast.
 
-> **What’s new?**  
-> The pipeline now supports **arbitrary, project-specific class names**.  
-> Define them once in the beginning with the `setup_project` script and the code will:
-> * rewrite `dataset.yaml` with the right label set  
-> * use and remap any imported dataset with different formats supported
-> * train & evaluate only on the classes you specify  
+> **What's new?**  
+> The pipeline now supports **arbitrary, project-specific class names** and **fine-tuning capabilities**.  
+> Define custom classes once with the `setup_project` script, and optionally start training from your own pre-trained models instead of base YOLO checkpoints.
+
 ---
 
 ## Table of Contents
@@ -25,7 +23,21 @@ DVC (Data Version Control) is a tool that works alongside Git to handle large fi
 2. [Managing Project Data](#managing-project-data)
 3. [The Experiment Workflow](#the-experiment-workflow)
 4. [Custom Class Configuration](#custom-class-configuration)
-5. [Raw Data Structure Guide](#raw-data-structure-guide)
+5. [Fine-tuning Guide](#fine-tuning)
+6. [Raw Data Structure Guide](#raw-data-structure-guide)
+
+---
+
+## Fine-tuning
+
+This repository supports fine-tuning from pre-trained models (like `taco-uav-model.pt`) instead of starting from scratch. Fine-tuning is ideal when you want to adapt an existing waste detection model to new domain-specific data.
+
+**Quick Start:**
+1. Set `finetune_mode: true` in `params.yaml`
+2. Configure `pretrained_model_path` to point to your model
+3. Adjust learning rate and epochs for fine-tuning
+
+See [FINETUNING.md](FINETUNING.md) for detailed configuration options and best practices.
 
 ---
 
