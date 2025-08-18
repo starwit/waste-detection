@@ -6,10 +6,8 @@ data:
   # If not defined or empty, the system will fall back to selected COCO classes
   custom_classes:
     # Example custom classes (uncomment and modify as needed):
-    - "waste"
-    - "cigarette"
-    # - "organic"
-  # Whether to use COCO classes when custom_classes is not defined
+  - waste
+  - cigarette
   use_coco_classes: false
 prepare:
   val_split: 0.1
@@ -20,3 +18,9 @@ train:
   image_size: 1280
   epochs: 50
   batch_size: 8
+  # Fine-tuning configuration
+  finetune_mode: true  # Set to true to enable fine-tuning
+  pretrained_model_path: taco-uav-model.pt    # Path to pre-trained model
+  finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
+  finetune_epochs: 20  # Typically fewer epochs needed for fine-tuning
+  freeze_backbone: true  # Whether to freeze backbone layers during fine-tuning
