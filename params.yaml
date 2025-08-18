@@ -6,17 +6,30 @@ data:
   # If not defined or empty, the system will fall back to selected COCO classes
   custom_classes:
     # Example custom classes (uncomment and modify as needed):
-    - "waste"
-    - "cigarette"
-    # - "organic"
-  # Whether to use COCO classes when custom_classes is not defined
+  - waste
+  - cigarette
   use_coco_classes: false
 prepare:
   val_split: 0.1
   test_split: 0.1
   augment_multiplier: 1
+  # Folder subset configuration - use only a percentage of images from specific folders
+  folder_subsets:
+    # Example: use only 50% of images from uavvaste folder
+    uavvaste: 0.5
+    # Example: use only 30% of images from taco folder
+    taco: 0.3
+    # Example: oversample a folder - use 200% means each image appears twice
+    cw32-08-07-train: 2.0
+    # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
   image_size: 1280
   epochs: 50
   batch_size: 8
+  # Fine-tuning configuration
+  finetune_mode: false  # Set to true to enable fine-tuning
+  pretrained_model_path: taco-uav-model.pt    # Path to pre-trained model
+  finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
+  finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
+  freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
