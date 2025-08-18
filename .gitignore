@@ -19,6 +19,9 @@ __pycache__
 *.cache
 *.pt
 
+# Track specific pre-trained models for fine-tuning
+!taco-uav-model.pt
+
 # dataset-images
 datasets/*
 # !*/datasets/.gitkeep
@@ -41,3 +44,5 @@ Konsortialtreffen/*
 /results_comparison
 /runs
 /metrics.json
+
+WAS_videos/
