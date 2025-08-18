@@ -6,25 +6,25 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: 7e0e4c6b0283d578eabeca2f28d77cc4.dir
-      size: 3141547930
-      nfiles: 13595
+      md5: 995f2d0ea3b9e64dd44a71034d5ea549.dir
+      size: 398301739
+      nfiles: 692
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 19d63a2f7eb383b7dc384e65c489fb2e
-      size: 12314
+      md5: 86931e913cd37f8da2fc8aab1354cffd
+      size: 15684
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 7b3e05cddbfc6b595f0cbc2d03c25818
-      size: 28534
+      md5: 4c13ab16a6e6937d68d33b404ea5ffef
+      size: 28630
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: c493dae523e0270f12c2627ba42f1f5b
-      size: 8510
+      md5: a01d85b2dde81ae0e06f2268083fea69
+      size: 8136
     params:
       params.yaml:
         data:
@@ -41,34 +41,38 @@ stages:
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 5b183f9e613be657091861c431c9349b.dir
-      size: 3137861882
-      nfiles: 13340
+      md5: d70647194673e887ae6446383ee5a58a.dir
+      size: 398277797
+      nfiles: 688
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: 675e57ad2ec20bf9ecccefcd01e59612.dir
-      size: 3140168963
-      nfiles: 13343
+      md5: 789c527d98cdf26f152d15478da48d48.dir
+      size: 398375748
+      nfiles: 691
+    - path: taco-uav-model.pt
+      hash: md5
+      md5: 34a611d68a32a111b0a012a7428aaddc
+      size: 52186507
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 19d63a2f7eb383b7dc384e65c489fb2e
-      size: 12314
+      md5: 86931e913cd37f8da2fc8aab1354cffd
+      size: 15684
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 7b3e05cddbfc6b595f0cbc2d03c25818
-      size: 28534
+      md5: 4c13ab16a6e6937d68d33b404ea5ffef
+      size: 28630
     - path: yolov8_training/utils/evaluate.py
       hash: md5
-      md5: 53af6681039135a23a47ccde94dccb6d
-      size: 25569
+      md5: d7de9a5b7fca7316044c300cbe219ff4
+      size: 27212
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: c493dae523e0270f12c2627ba42f1f5b
-      size: 8510
+      md5: a01d85b2dde81ae0e06f2268083fea69
+      size: 8136
     params:
       params.yaml:
         data:
@@ -84,18 +88,23 @@ stages:
           image_size: 1280
           epochs: 50
           batch_size: 8
+          finetune_mode: true
+          pretrained_model_path: taco-uav-model.pt
+          finetune_lr: 0.0001
+          finetune_epochs: 30
+          freeze_backbone: true
     outs:
     - path: metrics.json
       hash: md5
-      md5: 5d741e2fa9b50e7bf44e0b5fcf2f83c4
-      size: 331
+      md5: 2863bb5922ef60d59186a489dc27b6eb
+      size: 395
     - path: results_comparison/
       hash: md5
-      md5: 7f7cd7253c674c2277188f5c99792cd0.dir
-      size: 1508
+      md5: 3387cec193641f7990a9544e5aff4788.dir
+      size: 1927
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 6452c3cf3b3d54b9683c81aee659d541.dir
-      size: 167888407
-      nfiles: 52
+      md5: e6a201f0a83126d4f984d0035374667b.dir
+      size: 399023358
+      nfiles: 117
