@@ -117,8 +117,8 @@ def main():
                                         args.min_duration, args.gps_min_distance, facility_area)
         print(f"  GPS filter found {len(segments)} cleaning segments")
         
-        # Find cleaning segments using a visual classifier (i.e. is equipment active)
-        if args.classifier_weights:
+        # Find cleaning segments using a visual classifier (i.e. is equipment active), but only if GPS filtering found segments (visual is expensive)
+        if args.classifier_weights and len(segments) > 0:
             print(f"  Running cleaning classifier")
             classifier_output = run_cleaning_classifier(video_file, args.classifier_weights, args.classifier_stride_sec, args.classifier_debounce_interval, args.classifier_threshold)
             classifier_segments = find_cleaning_segments_classifier(classifier_output, args.min_duration)
