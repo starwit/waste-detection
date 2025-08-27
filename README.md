@@ -4,15 +4,14 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 
 ### Why DVC here?
 
-- Large files: Keeps datasets and model weights out of Git history while versioning them alongside code.
-- Reproducibility: The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
+- **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.
+- **Reproducibility:** The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
 
 
 > About this fork
 > - Task: waste detection
 > - Current classes (from params.yaml): `waste`, `cigarette` (to keep it focused for now and not introduce too many classes while we don't have much training data)
 > - Pipeline: Ultralytics YOLOv8 with DVC-managed data and outputs
-
 ---
 
 ## Table of Contents
@@ -49,16 +48,24 @@ Follow these steps once after creating this project from the template.
    poetry install
    poetry shell
    ```
-4. Run the interactive setup script
-   ```bash
-   python setup_project.py
-   ```
-   The script will:
-   - prompt for a project & dataset name
-   - optionally ask for a comma-separated list of class names
-   - patch `.dvc/config` (remote URL) and `params.yaml`
-   - create the `raw_data/train` and `raw_data/test` folders
-5. Commit the initial configuration
+
+**4. Run the Interactive Setup Script**
+
+A helper script configures the project’s connection to remote storage and (optionally) custom classes.
+
+```bash
+python setup_project.py
+```
+
+The script will:
+
+* prompt for a project & dataset name  
+* optionally ask for a comma-separated list of class names  
+* patch `.dvc/config` (remote URL) and `params.yaml` accordingly  
+* create the `raw_data/train` and `raw_data/test` folders
+
+**5. Commit the Initial Configuration**
+   The bootstrap script modifies configuration files. Commit these changes to save the project setup.
    ```bash
    git add .dvc/config params.yaml
    git commit -m "Initialize project configuration"
@@ -147,7 +154,7 @@ data:
   use_coco_classes: false
 ```
 
-To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a data YAML is present.
+To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
 
 ---
 
@@ -157,10 +164,13 @@ Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (hol
 
 | # | Layout | What to do | Notes |
 |---|--------|------------|-------|
-| 1 | CVAT YOLO export | Drop the whole export folder (`data.yaml`, `images/`, `labels/`, `train.txt`). | `train.txt` is parsed automatically. |
-| 2 | Standard YOLO | Inside a subfolder create `images/` & `labels/`. | Class IDs get remapped if needed. |
-| 3 | Scene‑based test sets | One subfolder per scene with `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
-| 4 | Folder with `data.yaml` / `dataset.yaml` | Copy it in. | Classes are mapped by name to your `params.yaml` classes. |
+| 1 | **CVAT YOLO export** | Drop the whole export folder (`data.yaml`, `images/`, `labels/`, `train.txt`). | `train.txt` is automatically parsed. |
+| 2 | **Standard YOLO** | Inside a subfolder create `images/` & `labels/`. | Class IDs will be remapped if needed. |
+| 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
+| 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
+
+> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
+> The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
 Example scene‑based layout:
 
@@ -227,4 +237,3 @@ python yolov8_training/train_pipeline.py \
 Behavior:
 - Ratios between 0 and 1.0 subsample a folder.
 - Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn’t leak duplicates between sources.
-
