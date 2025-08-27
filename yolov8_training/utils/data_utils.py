@@ -787,42 +787,30 @@ def process_single_images(
     # Check for duplicates between different folders (only if more than one folder)
     if len(folder_groups) > 1:
         print("\nChecking for duplicates between different folders...")
-        
+
         # Collect unique representative images from each folder
         all_unique_images = []
         for folder_name, unique_images in unique_images_per_folder.items():
             all_unique_images.extend(unique_images)
-        
+
         # Find cross-folder duplicates
         cross_clusters = detector.find_duplicates(all_unique_images)
-        
+
         if cross_clusters:
             print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
             detector.print_duplicate_clusters(cross_clusters)
-            
-            # Get images that are unique across all folders
+
+            # Images that are unique across all folders (kept representatives)
             cross_unique_images = set(detector.get_unique_images(all_unique_images))
-            
-            # Filter processed_pairs to remove cross-folder duplicates
+
+            # Filter: keep only pairs whose image is a cross-folder unique representative
+            # For oversampled folders, this also keeps their oversampled copies
+            # only if the representative image itself is kept.
             final_pairs = []
             for img_path, lbl_path, scene_name in processed_pairs:
-                folder_unique_images = unique_images_per_folder[scene_name]
-                
-                if scene_name in oversampled_folders:
-                    # For oversampled folders: keep if the original image is unique across folders
-                    # or if it's a duplicate within the same folder (which we want to keep)
-                    if img_path in folder_unique_images:
-                        # This is a unique representative - check if unique across folders
-                        if img_path in cross_unique_images:
-                            final_pairs.append((img_path, lbl_path, scene_name))
-                    else:
-                        # This is an oversampled duplicate within the same folder - keep it
-                        final_pairs.append((img_path, lbl_path, scene_name))
-                else:
-                    # For normal folders: keep only if unique across all folders
-                    if img_path in cross_unique_images:
-                        final_pairs.append((img_path, lbl_path, scene_name))
-            
+                if img_path in cross_unique_images:
+                    final_pairs.append((img_path, lbl_path, scene_name))
+
             processed_pairs = final_pairs
         else:
             print("No duplicates found between different folders")
