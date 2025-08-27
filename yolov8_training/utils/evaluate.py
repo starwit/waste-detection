@@ -54,19 +54,9 @@ def evaluate_and_log_model_results(
     """
     Evaluates the model on the test set, prepares metadata, and appends results to the CSV.
     """
-    # Print model information for debugging
-    print(f"\n=== Evaluating Model: {model_name} ===")
-    if hasattr(model, 'model') and hasattr(model.model, 'yaml'):
-        print(f"Model yaml path: {getattr(model.model, 'yaml_file', 'N/A')}")
-    print(f"Is original/baseline: {is_original}")
-    print(f"Baseline model provided: {baseline_model is not None}")
-    
     # Get class information from dataset
     dataset_yaml_path = test_path / "dataset.yaml"
     class_names, class_ids = get_dataset_classes(dataset_yaml_path)
-    
-    print(f"Dataset classes: {class_names}")
-    print(f"Class IDs for evaluation: {class_ids}")
     
     # Run evaluation on the model
     results = validate_model(
