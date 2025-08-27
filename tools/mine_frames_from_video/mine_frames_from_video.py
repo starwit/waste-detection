@@ -886,7 +886,7 @@ def main():
     parser = argparse.ArgumentParser(description="Review or precompute detections for hard-example mining")
     parser.add_argument("--batch-precompute", action="store_true", help="Run headless precompute over a folder of videos")
     parser.add_argument("--input-dir", type=Path, help="Input directory with videos for precompute")
-    parser.add_argument("--pattern", type=str, default="*.mp4", help="Globbing pattern for videos, e.g., *.mp4 or **/*.mp4")
+    parser.add_argument("--pattern", type=str, default="*.mkv", help="Globbing pattern for videos, e.g., *.mp4 or **/*.mp4")
     parser.add_argument("--weights", type=Path, help="YOLO weights .pt path (required for precompute)")
     parser.add_argument("--force", action="store_true", help="Recompute caches even if they already exist")
     parser.add_argument("--output-dir", type=Path, help="Directory to save output videos and label files (for download)")
