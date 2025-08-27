@@ -1,37 +1,45 @@
 
-# YOLO Retraining Pipeline Template
+# Waste Detection — YOLOv8 + DVC
 
-This repository provides a standardized, reusable template for retraining YOLO models. It uses DVC (Data Version Control) to manage datasets, track experiments, and ensure reproducible results across the team.
+This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
 
-### What is DVC?
+### Why DVC here?
 
-DVC (Data Version Control) is a tool that works alongside Git to handle large files like datasets and machine learning models.
+- **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.
+- **Reproducibility:** The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
 
-**Goal in this Project:**
-- **Version Control for Data:** Git tracks our code, while DVC tracks our large data files.
-- **Reproducibility:** Anyone on the team can get the exact code, data, and model for any version of the project, ensuring that all results are reproducible.
-- **Centralized Storage:** DVC manages uploading and downloading data to a shared remote storage (Hetzner in our case), keeping our Git repository small and fast.
 
-> **What’s new?**  
-> The pipeline now supports **arbitrary, project-specific class names**.  
-> Define them once in the beginning with the `setup_project` script and the code will:
-> * rewrite `dataset.yaml` with the right label set  
-> * use and remap any imported dataset with different formats supported
-> * train & evaluate only on the classes you specify  
+> About this fork
+> - Task: waste detection
+> - Current classes (from params.yaml): `waste`, `cigarette` (to keep it focused for now and not introduce too many classes while we don't have much training data)
+> - Pipeline: Ultralytics YOLOv8 with DVC-managed data and outputs
+
 ---
 
 ## Table of Contents
-1. [Initial Project Setup](#initial-project-setup)
-2. [Managing Project Data](#managing-project-data)
-3. [The Experiment Workflow](#the-experiment-workflow)
-4. [Custom Class Configuration](#custom-class-configuration)
-5. [Raw Data Structure Guide](#raw-data-structure-guide)
+1. [Models & Releases](#models--releases)
+2. [Initial Project Setup](#initial-project-setup)
+3. [Managing Project Data](#managing-project-data)
+4. [Experiment Workflow](#experiment-workflow)
+5. [Custom Classes](#custom-classes)
+6. [Raw Data Structure](#raw-data-structure)
 
 ---
 
+## Models & Releases
+
+This repo publishes trained models with each GitHub Release and also tracks the currently applied model via DVC.
+
+- Latest model (main): The model currently applied on the main branch is the one referenced in `dvc.lock` under the `runs/` output. To fetch it locally, run `dvc pull` (requires access to the configured DVC remote).
+- Release assets: Each release includes the trained weights and metadata so you don’t need DVC to use the model:
+  - `weights/best.pt`: the promoted YOLO weights for inference
+  - `test_metrics.json`: evaluation metrics of the promoted run
+  - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
+
+
 ## Initial Project Setup
 
-Follow these steps once to create a new project from this template.
+Follow these steps once after creating this project from the template.
 
 **1. Create the New Repository**
    - On the GitHub page for this template, click the **"Use this template"** button.
@@ -48,10 +56,10 @@ Follow these steps once to create a new project from this template.
 
 **4. Run the Interactive Setup Script**
 
-A helper script configures the project’s connection to remote storage **and** asks whether you want to specify custom classes.
+A helper script configures the project’s connection to remote storage and (optionally) custom classes.
 
 ```bash
-python scripts/setup_project.py
+python setup_project.py
 ```
 
 The script will:
@@ -104,7 +112,7 @@ After the initial setup, follow this process whenever you add or update the raw 
 
 ---
 
-## The Experiment Workflow
+## Experiment Workflow
 
 This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
 
@@ -177,8 +185,23 @@ Once you identify a superior experiment, promote it to become the official versi
 
 ---
 
+## Custom Classes
 
-## Raw Data Structure Guide
+This fork is configured for waste detection. By default, the classes are defined in `params.yaml`:
+
+```yaml
+data:
+  custom_classes:
+    - waste
+    - cigarette
+  use_coco_classes: false
+```
+
+To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
+
+---
+
+## Raw Data Structure
 
 Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
 The importer now accepts **any** of the following:
@@ -190,7 +213,7 @@ The importer now accepts **any** of the following:
 | 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
 | 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
 
-> **Tip:** When you use option&nbsp;4 you can bring in public datasets or prior labeling runs “as is”.  
+> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
 > The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
 Example scene‑based layout:
