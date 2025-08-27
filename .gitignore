@@ -19,8 +19,6 @@ __pycache__
 *.cache
 *.pt
 
-# Track specific pre-trained models for fine-tuning
-!taco-uav-model.pt
 
 # dataset-images
 datasets/*
