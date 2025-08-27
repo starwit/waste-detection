@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -13,6 +15,10 @@ from tqdm import tqdm
 import torch
 
 from ultralytics import YOLO
+
+# Linux X11/SSH support: ensure Qt-based backends use X11 (xcb) when DISPLAY is set.
+if sys.platform.startswith("linux") and os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 
 # Optional GUI deps (available on local laptop). On headless epic gpu, these may be missing.
@@ -37,13 +43,11 @@ class Selection:
     - weights_path: YOLO `.pt` file path
     - output_dir: where saved frames and JSON sidecars go
     - skip_after_save: frames to jump ahead after saving
-    - precompute: build/load cache before playback
     """
     video_path: Path
     weights_path: Path
     output_dir: Path
     skip_after_save: int
-    precompute: bool
 
 
 def human_size(num_bytes: int) -> str:
@@ -86,7 +90,6 @@ class SelectorUI:
         self.weights_var = tk.StringVar(value=prefill_weights or "")
         self.output_dir_var = tk.StringVar(value=prefill_output_dir or "")
         self.skip_after_var = tk.IntVar(value=0)
-        self.precompute_var = tk.BooleanVar(value=False)
 
         self._build()
         self.video_paths: List[Path] = []
@@ -141,7 +144,6 @@ class SelectorUI:
         o_row.pack(fill=tk.X, **pad)
         ttk.Label(o_row, text="Skip frames after save:").pack(side=tk.LEFT)
         ttk.Spinbox(o_row, from_=0, to=10000, textvariable=self.skip_after_var, width=8).pack(side=tk.LEFT, padx=(6, 16))
-        ttk.Checkbutton(o_row, text="Precompute detections (cache to disk)", variable=self.precompute_var).pack(side=tk.LEFT)
 
         # Start button
         btn_row = ttk.Frame(frm)
@@ -209,7 +211,6 @@ class SelectorUI:
             weights_path=Path(self.weights_var.get()),
             output_dir=Path(self.output_dir_var.get()),
             skip_after_save=int(self.skip_after_var.get()),
-            precompute=bool(self.precompute_var.get()),
         )
 
 
@@ -380,7 +381,6 @@ class Player:
         self._last_preds: List[Dict] = []
         self._deduper = Deduper(max_hamming=4)
         self.skip_after_save = int(selection.skip_after_save)
-        self.precompute = bool(selection.precompute)
         self.cache: Optional[DiskCache] = None
         self.show_help = False
         self.current_tag: Optional[str] = None
@@ -395,10 +395,7 @@ class Player:
             cv2.createTrackbar("position", self.window, 0, self.total - 1, self._on_seek)
 
         cache_probe = DiskCache(self.video_path, self.weights_path)
-        if self.precompute:
-            self._ensure_cache()
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        elif cache_probe.exists():
+        if cache_probe.exists():
             print("Found existing cache on disk; using it for playback …")
             self.cache = cache_probe.load()
             # Prefer class names from cache meta if present
@@ -753,7 +750,15 @@ def run_gui_and_play(prefill_snippets_dir: Optional[str] = None, prefill_weights
     if tk is None:
         print("GUI libraries not available in this environment.")
         return
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except Exception as e:
+        # Helpful hint for SSH/X11 users
+        if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+            print("Error: No DISPLAY found. On Linux over SSH, enable X11 forwarding with 'ssh -X' or 'ssh -Y'.")
+        else:
+            print(f"Error initializing Tkinter: {e}")
+        return
     ui = SelectorUI(root, prefill_snippets_dir=prefill_snippets_dir, prefill_weights=prefill_weights, prefill_output_dir=prefill_output_dir)
     root.mainloop()
     sel = ui.get_selection()
