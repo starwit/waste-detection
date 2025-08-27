@@ -57,13 +57,11 @@ def evaluate_and_log_model_results(
     # Get class information from dataset
     dataset_yaml_path = test_path / "dataset.yaml"
     class_names, class_ids = get_dataset_classes(dataset_yaml_path)
-    
+
     # Run evaluation on the model
     results = validate_model(
         model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0
     )
-
-    print(f"Evaluation results - Precision: {results['precision']:.4f}, Recall: {results['recall']:.4f}, mAP50: {results['map50']:.4f}")
 
     # Prepare metadata
     metadata = {
