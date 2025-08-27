@@ -41,9 +41,14 @@ This repo publishes trained models with each GitHub Release and also tracks the 
 
 Follow these steps once after creating this project from the template.
 
-1. Create the new repository from the template on GitHub
-2. Clone your new repository locally
-3. Install dependencies (Poetry)
+**1. Create the New Repository**
+   - On the GitHub page for this template, click the **"Use this template"** button.
+   - Assign a name to your new repository (e.g., `waste-detection-2025`) and confirm its creation.
+
+**2. Clone Your New Repository**
+
+**3. Install Dependencies**
+   This project uses Poetry for dependency management.
    ```bash
    poetry install
    poetry shell
@@ -70,6 +75,7 @@ The script will:
    git add .dvc/config params.yaml
    git commit -m "Initialize project configuration"
    ```
+The project is now fully configured and ready for data.
 
 ---
 
@@ -77,19 +83,30 @@ The script will:
 
 After the initial setup, follow this process whenever you add or update the raw dataset.
 
-1. Add your data under `raw_data/train/` and/or `raw_data/test/`
-2. Track data changes with DVC
+**1. Add Your Data**
+   - Place your new or updated data files into the `raw_data/train/` or `raw_data/test/` directories, following the structure guide below.
+
+**2. Track Data with DVC**
+   - Use the `dvc add` command to tell DVC to track the state of your data directory.
    ```bash
    dvc add raw_data
    ```
-3. Commit the pointer file with Git
+   This command creates/updates a small `raw_data.dvc` file. This file acts as a pointer to the actual data, which DVC manages.
+
+**3. Commit the Pointer File with Git**
+   - Add the `.dvc` file to Git. This records the "version" of your data that corresponds to your code.
    ```bash
    git add raw_data.dvc
-   git commit -m "Add/Update raw_data"
+   git commit -m "Add new batch of training images"
    ```
-4. Push both code and data
+
+**4. Push Both Code and Data**
+   Pushing is a two-step process: `dvc push` uploads your large data files to the shared Hetzner storage, and `git push` uploads your code and the small DVC pointer file.
    ```bash
+   # Step 1: Upload the actual data files to remote storage
    dvc push
+
+   # Step 2: Upload the code and data pointers
    git push
    ```
 
@@ -97,16 +114,23 @@ After the initial setup, follow this process whenever you add or update the raw 
 
 ## Experiment Workflow
 
-All training parameters live in `params.yaml`. Example:
+This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
+
+### 1  Configure Parameters
+
+All training parameters live in **`params.yaml`**.  
+Key fields:
 
 ```yaml
 data:
   dataset_name: waste-detection
   experiment_name: waste-detection
+
+  # ↓ Optional — override COCO classes
   custom_classes:
-    - waste
-    - cigarette
-  use_coco_classes: false
+    - "waste"
+    - "cigarette"
+  use_coco_classes: false     # fallback to COCO if true/empty
 
 train:
   model_size: m
@@ -115,30 +139,49 @@ train:
   batch_size: 8
 ```
 
-- If `custom_classes` is non-empty, those names become class IDs 0…n-1.
-- If it’s empty and `use_coco_classes: true`, a predefined COCO subset is used.
+* If `custom_classes` is non-empty, those names become class 0…n-1.  
+* If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
 
-Run and compare experiments locally with DVC:
+### Step 2: Run Experiments
+Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
 
 ```bash
-# Run with params from params.yaml
+# Run an experiment with the settings from params.yaml
 dvc exp run -n "large-model-150-epochs"
+```
+For quick iterations, you can override parameters from the command line with the `-S` flag:
+```bash
+# Test a different parameter without editing params.yaml
+dvc exp run -n "test-smaller-batch-size" -S train.batch_size=4
+```
 
-# Override parameters without editing params.yaml
-dvc exp run -n "smaller-batch" -S train.batch_size=4
+### Step 3: Review and Compare Results
+Use `dvc exp show` to display a leaderboard of all local experiments. This table includes the parameters and performance metrics for each run, allowing for easy comparison.
 
-# Compare experiments
+```bash
+# Sort the table by a key metric to find the best performer
 dvc exp show --sort-by metrics/fitness --sort-order desc
 ```
 
-Promote a winning experiment:
+### Step 4: Promote a Winning Experiment
+Once you identify a superior experiment, promote it to become the official version in the main project branch.
 
-```bash
-dvc exp apply <exp-name>
-git add .
-git commit -m "Promote new model: <short description>"
-dvc push && git push
-```
+1.  **Apply the winner's results** to your workspace. This command updates your `params.yaml` and output files to match the state of the selected experiment.
+    ```bash
+    dvc exp apply <name-of-your-winning-experiment>
+    ```
+
+2.  **Commit this "Golden" version** to Git. This is the only time a commit is made after a series of experiments.
+    ```bash
+    git add .
+    git commit -m "Promote new model with 150 epochs, achieves 0.92 fitness"
+    ```
+
+3.  **Push the final result** to the shared remotes.
+    ```bash
+    dvc push  # Uploads the winning model's data files
+    git push  # Pushes the commit with the updated project state
+    ```
 
 ---
 
@@ -160,7 +203,8 @@ To change classes, edit `params.yaml` or re-run `python setup_project.py` and fo
 
 ## Raw Data Structure
 
-Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (hold‑out set). The importer accepts:
+Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
+The importer now accepts **any** of the following:
 
 | # | Layout | What to do | Notes |
 |---|--------|------------|-------|
@@ -169,7 +213,7 @@ Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (hol
 | 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
 | 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
 
-> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
+> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
 > The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
 Example scene‑based layout:
@@ -184,8 +228,6 @@ raw_data/
         ├── images/
         └── labels/
 ```
-
----
 
 ## Fine-tuning
 
