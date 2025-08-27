@@ -49,6 +49,7 @@ def evaluate_and_log_model_results(
     val_split,
     train_epochs=0,
     is_original=False,
+    baseline_model=None,
 ):
     """
     Evaluates the model on the test set, prepares metadata, and appends results to the CSV.
@@ -56,7 +57,7 @@ def evaluate_and_log_model_results(
     # Get class information from dataset
     dataset_yaml_path = test_path / "dataset.yaml"
     class_names, class_ids = get_dataset_classes(dataset_yaml_path)
-    
+
     # Run evaluation on the model
     results = validate_model(
         model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0
@@ -78,26 +79,37 @@ def evaluate_and_log_model_results(
 
     # Also add to the global comparison table
     if not is_original:
-        # Extract model size
-        model_size = "m"  # Default size if we can't determine it
-        if hasattr(model, "model") and hasattr(model.model, "yaml"):
-            # Try to get size from model yaml
-            if "model_name" in model.model.yaml:
-                name = model.model.yaml["model_name"]
-                if "yolov8" in name and len(name) > 6:
-                    model_size = name[6]  # Extract the size character (n, s, m, l, x)
-
         # Get the base model results for comparison if this is a retrained model
         try:
-            base_model = YOLO(f"yolov8{model_size}.pt")
+            # Use the provided baseline_model if available, otherwise fall back to COCO model
+            if baseline_model is not None:
+                base_model = baseline_model
+                print(f"Using provided baseline model for comparison")
+            else:
+                # Extract model size for fallback to COCO model
+                model_size = "m"  # Default size if we can't determine it
+                if hasattr(model, "model") and hasattr(model.model, "yaml"):
+                    # Try to get size from model yaml
+                    if "model_name" in model.model.yaml:
+                        name = model.model.yaml["model_name"]
+                        if "yolov8" in name and len(name) > 6:
+                            model_size = name[6]  # Extract the size character (n, s, m, l, x)
+                base_model = YOLO(f"yolov8{model_size}.pt")
+                print(f"Using COCO baseline model: yolov8{model_size}.pt")
+                
             base_results = validate_model(
                 base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0, write_json=False
             )
-            mean_table(base_results, results, model_name, True)
+            # Determine base model name for display
+            if baseline_model is not None:
+                base_model_name = f"{model_name.replace('-finetune', '')}-pretrained"
+            else:
+                base_model_name = f"YOLOv8{model_size} (COCO)"
+            mean_table(base_results, results, model_name, True, base_model_name)
         except Exception as e:
             print(f"Warning: Could not load base model for comparison: {e}")
             # Still add the retrained model results to the table
-            mean_table(None, results, model_name, False)
+            mean_table(None, results, model_name, False, None)
 
     return metadata
 
@@ -565,7 +577,7 @@ def create_formatted_table(csv_path):
         f.write(formatted_descriptions)
 
 
-def mean_table(path_results1, path_results2, experiment_name, base_run):
+def mean_table(path_results1, path_results2, experiment_name, base_run, base_model_name=None):
     # Collect all columns, including scene metrics
     basic_columns = [
         "MODEL",
@@ -604,7 +616,8 @@ def mean_table(path_results1, path_results2, experiment_name, base_run):
 
     if base_run and path_results1 is not None:
         # Create data for base model
-        base_row = ["YOLOv8m (base run)"]
+        base_model_display_name = base_model_name if base_model_name else "YOLOv8m (base run)"
+        base_row = [base_model_display_name]
         for col in basic_columns[1:]:  # Skip MODEL column
             base_row.append(path_results1[col.lower()])
 
@@ -671,7 +684,7 @@ def main(args):
 
         # f1_pre_rec_curves(path_results_coco, path_results_carmel)
         # confusion_matrices(path_results_coco, path_results_carmel)
-        mean_table(path_results_coco, path_results_carmel, experiment_name, True)
+        mean_table(path_results_coco, path_results_carmel, experiment_name, True, f"YOLOv8{args.yolo_size} (COCO)")
         # ap_curve(path_results_coco, path_results_carmel)
     else:
         path_results_carmel = validate_model(
@@ -684,7 +697,7 @@ def main(args):
             Path("datasets/tspwob-yolotest-101224/test/val/images"),
             weights_dir.parent.parent,
         )
-        mean_table(None, path_results_carmel, experiment_name, False)
+        mean_table(None, path_results_carmel, experiment_name, False, None)
 
 
 if __name__ == "__main__":

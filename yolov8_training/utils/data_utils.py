@@ -441,6 +441,7 @@ def process_single_images(
     augment_multiplier: int,
     custom_classes=None,
     use_coco_classes=True,
+    folder_subsets=None,
 ):
     """
     Process single images and their labels, splitting them into train/val/test sets.
@@ -455,7 +456,10 @@ def process_single_images(
         augment_multiplier: Augmentation multiplier
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
+        folder_subsets: Dictionary mapping folder names to subset ratios (0.0-1.0)
     """
+    if folder_subsets is None:
+        folder_subsets = {}
     # Create output directories
     train_img_output_path = train_output_path / "train" / "images"
     val_img_output_path = train_output_path / "val" / "images"
@@ -503,6 +507,7 @@ def process_single_images(
         train_txt = folder_to_process / "train.txt"
         if train_txt.exists():
             # Process CVAT export format
+            folder_pairs = []  # Collect pairs for this folder
             with open(train_txt, "r") as f:
                 image_paths = [line.strip() for line in f.readlines()]
 
@@ -533,7 +538,7 @@ def process_single_images(
                         empty_label_count += 1
 
                     convert_polygons_to_bboxes_inplace(label_path)
-                    image_label_pairs.append((image_path, label_path, scene_name))
+                    folder_pairs.append((image_path, label_path, scene_name))
                 else:
                     skip_count += 1
 
@@ -545,7 +550,7 @@ def process_single_images(
                 temp_folders.append(temp_folder)
 
                 # Update paths to use temp folder
-                image_label_pairs = [
+                folder_pairs = [
                     (
                         Path(
                             str(img_path).replace(
@@ -559,8 +564,46 @@ def process_single_images(
                         ),
                         scene_name,
                     )
-                    for img_path, lbl_path, scene_name in image_label_pairs
+                    for img_path, lbl_path, scene_name in folder_pairs
                 ]
+            
+            # Apply folder subset sampling or oversampling if configured
+            folder_name = some_folder.name
+            if folder_name in folder_subsets:
+                subset_ratio = folder_subsets[folder_name]
+                if subset_ratio > 1:
+                    # Oversampling case
+                    original_count = len(folder_pairs)
+                    oversample_factor = int(subset_ratio)
+                    remainder = subset_ratio - oversample_factor
+                    
+                    # Create copies for full oversampling
+                    oversampled_pairs = folder_pairs * oversample_factor
+                    
+                    # Add partial oversampling if there's a remainder
+                    if remainder > 0:
+                        random.shuffle(folder_pairs)
+                        partial_count = int(len(folder_pairs) * remainder)
+                        oversampled_pairs.extend(folder_pairs[:partial_count])
+                    
+                    folder_pairs = oversampled_pairs
+                    print(f"Folder '{folder_name}': Oversampled to {len(folder_pairs)} images from {original_count} ({subset_ratio*100:.1f}%)")
+                    
+                elif 0 < subset_ratio < 1:
+                    # Subsampling case
+                    original_count = len(folder_pairs)
+                    # Randomly sample the specified percentage
+                    random.shuffle(folder_pairs)
+                    subset_count = int(len(folder_pairs) * subset_ratio)
+                    folder_pairs = folder_pairs[:subset_count]
+                    print(f"Folder '{folder_name}': Using {subset_count}/{original_count} images ({subset_ratio*100:.1f}%)")
+                elif subset_ratio == 1:
+                    print(f"Folder '{folder_name}': Using all {len(folder_pairs)} images (100%)")
+                else:
+                    print(f"Warning: Invalid subset ratio {subset_ratio} for folder '{folder_name}'. Must be > 0.")
+            
+            # Add pairs from this folder to the main list
+            image_label_pairs.extend(folder_pairs)
         else:
             # Manual dataset structure with images/ and labels/ folders
             images_folder = folder_to_process / "images"
@@ -643,6 +686,41 @@ def process_single_images(
                     print("Continuing without class mapping for this folder.")
             
             # Add all pairs from this folder
+            # Apply folder subset sampling or oversampling if configured
+            folder_name = some_folder.name
+            if folder_name in folder_subsets:
+                subset_ratio = folder_subsets[folder_name]
+                if subset_ratio > 1:
+                    # Oversampling case
+                    original_count = len(temp_pairs)
+                    oversample_factor = int(subset_ratio)
+                    remainder = subset_ratio - oversample_factor
+                    
+                    # Create copies for full oversampling
+                    oversampled_pairs = temp_pairs * oversample_factor
+                    
+                    # Add partial oversampling if there's a remainder
+                    if remainder > 0:
+                        random.shuffle(temp_pairs)
+                        partial_count = int(len(temp_pairs) * remainder)
+                        oversampled_pairs.extend(temp_pairs[:partial_count])
+                    
+                    temp_pairs = oversampled_pairs
+                    print(f"Folder '{folder_name}': Oversampled to {len(temp_pairs)} images from {original_count} ({subset_ratio*100:.1f}%)")
+                    
+                elif 0 < subset_ratio < 1:
+                    # Subsampling case
+                    original_count = len(temp_pairs)
+                    # Randomly sample the specified percentage
+                    random.shuffle(temp_pairs)
+                    subset_count = int(len(temp_pairs) * subset_ratio)
+                    temp_pairs = temp_pairs[:subset_count]
+                    print(f"Folder '{folder_name}': Using {subset_count}/{original_count} images ({subset_ratio*100:.1f}%)")
+                elif subset_ratio == 1:
+                    print(f"Folder '{folder_name}': Using all {len(temp_pairs)} images (100%)")
+                else:
+                    print(f"Warning: Invalid subset ratio {subset_ratio} for folder '{folder_name}'. Must be > 0.")
+            
             image_label_pairs.extend(temp_pairs)
 
     print(f"Included {empty_label_count} images with empty labels (no objects).")
@@ -660,29 +738,88 @@ def process_single_images(
     # Initialize duplicate detector
     detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
 
-    # Get all image paths
-    image_paths = [img_path for img_path, _, _ in image_label_pairs]
+    # Group images by their source folder
+    folder_groups = {}
+    for img_path, lbl_path, scene_name in image_label_pairs:
+        if scene_name not in folder_groups:
+            folder_groups[scene_name] = []
+        folder_groups[scene_name].append((img_path, lbl_path, scene_name))
 
-    # Find and print duplicate clusters
-    clusters = detector.find_duplicates(image_paths)
+    # Check which folders have been oversampled
+    oversampled_folders = {
+        folder_name for folder_name in folder_subsets.keys() 
+        if folder_subsets[folder_name] > 1
+    }
 
-    detector.print_duplicate_clusters(clusters)
+    # Process each folder
+    processed_pairs = []
+    unique_images_per_folder = {}  # Track unique images for cross-folder comparison
+    
+    for folder_name, folder_pairs in folder_groups.items():
+        folder_images = [img_path for img_path, _, _ in folder_pairs]
+        
+        if folder_name in oversampled_folders:
+            # For oversampled folders, keep all images (including intentional duplicates within folder)
+            print(f"Folder '{folder_name}': Keeping all {len(folder_pairs)} images (oversampled folder)")
+            processed_pairs.extend(folder_pairs)
+            
+            # For cross-folder duplicate detection, use only unique images from this folder
+            unique_folder_images = detector.get_unique_images(folder_images)
+            unique_images_per_folder[folder_name] = unique_folder_images
+            
+        else:
+            # For normal folders, remove duplicates within the folder
+            clusters = detector.find_duplicates(folder_images)
+            if clusters:
+                print(f"Found {len(clusters)} duplicate clusters in folder '{folder_name}':")
+                detector.print_duplicate_clusters(clusters)
+            
+            unique_folder_images = detector.get_unique_images(folder_images)
+            unique_folder_pairs = [
+                (img, lbl, scene) for img, lbl, scene in folder_pairs 
+                if img in unique_folder_images
+            ]
+            
+            print(f"Folder '{folder_name}': {len(unique_folder_pairs)}/{len(folder_pairs)} unique images after duplicate removal")
+            processed_pairs.extend(unique_folder_pairs)
+            unique_images_per_folder[folder_name] = unique_folder_images
 
-    # Get unique images
-    unique_images = detector.get_unique_images(image_paths)
+    # Check for duplicates between different folders (only if more than one folder)
+    if len(folder_groups) > 1:
+        print("\nChecking for duplicates between different folders...")
 
-    # Filter image_label_pairs to keep only unique images
-    filtered_pairs = [
-        (img, lbl, scene)
-        for img, lbl, scene in image_label_pairs
-        if img in unique_images
-    ]
+        # Collect unique representative images from each folder
+        all_unique_images = []
+        for folder_name, unique_images in unique_images_per_folder.items():
+            all_unique_images.extend(unique_images)
+
+        # Find cross-folder duplicates
+        cross_clusters = detector.find_duplicates(all_unique_images)
+
+        if cross_clusters:
+            print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
+            detector.print_duplicate_clusters(cross_clusters)
+
+            # Images that are unique across all folders (kept representatives)
+            cross_unique_images = set(detector.get_unique_images(all_unique_images))
+
+            # Filter: keep only pairs whose image is a cross-folder unique representative
+            # For oversampled folders, this also keeps their oversampled copies
+            # only if the representative image itself is kept.
+            final_pairs = []
+            for img_path, lbl_path, scene_name in processed_pairs:
+                if img_path in cross_unique_images:
+                    final_pairs.append((img_path, lbl_path, scene_name))
+
+            processed_pairs = final_pairs
+        else:
+            print("No duplicates found between different folders")
 
     print(f"\nOriginal number of images: {len(image_label_pairs)}")
-    print(f"Number of unique images after duplicate removal: {len(filtered_pairs)}")
-
-    # Continue with the filtered pairs instead of original image_label_pairs
-    image_label_pairs = filtered_pairs
+    print(f"Number of images after smart duplicate removal: {len(processed_pairs)}")
+    
+    # Continue with the processed pairs instead of original image_label_pairs
+    image_label_pairs = processed_pairs
 
     # add augmentation to the remaining images
     augmented_pairs, aug_temp_folders = augment(image_label_pairs, augment_multiplier)

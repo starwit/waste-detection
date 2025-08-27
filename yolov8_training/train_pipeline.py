@@ -40,8 +40,21 @@ def load_class_config():
         print(f"Warning: Could not load params.yaml: {e}")
         return [], True
 
+def load_folder_subset_config():
+    """Load folder subset configuration from params.yaml"""
+    try:
+        with open("params.yaml", "r") as f:
+            params = yaml.safe_load(f)
+        
+        folder_subsets = params.get("prepare", {}).get("folder_subsets", {})
+        return folder_subsets
+    except Exception as e:
+        print(f"Warning: Could not load folder subset config from params.yaml: {e}")
+        return {}
+
 def train_model(
-    dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100
+    dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
+    finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False
 ):
     """
     Train the YOLO model on the specified dataset.
@@ -53,13 +66,29 @@ def train_model(
         batch_size (int): Batch size for training.
         experiment_name (str): Name for the experiment.
         epochs (int): Number of training epochs.
+        finetune_mode (bool): Whether to use fine-tuning mode.
+        pretrained_model_path (str): Path to pre-trained model for fine-tuning.
+        finetune_lr (float): Learning rate for fine-tuning.
+        freeze_backbone (bool): Whether to freeze backbone layers during fine-tuning.
 
     Returns:
         model (YOLO): The trained YOLO model.
         results: Training results.
         Path: Directory path of the training output.
     """
-    model = YOLO(f"yolov8{model_size}.pt")
+    # Choose model based on fine-tuning mode
+    if finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
+        print(f"Fine-tuning mode enabled. Loading pre-trained model: {pretrained_model_path}")
+        model = YOLO(pretrained_model_path)
+        
+        # Update experiment name to indicate fine-tuning
+        experiment_name = f"{experiment_name}-finetune"
+    else:
+        if finetune_mode:
+            print(f"Warning: Fine-tuning mode enabled but pre-trained model not found at {pretrained_model_path}")
+            print("Falling back to training from scratch with YOLO checkpoint")
+        model = YOLO(f"yolov8{model_size}.pt")
+    
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
@@ -72,19 +101,33 @@ def train_model(
         name = f"{base_name}_{run_number}"
         run_number += 1
 
-    results = model.train(
-        data=str(dataset_path / "dataset.yaml"),
-        epochs=epochs,
-        imgsz=image_size,
-        batch=batch_size,
-        device=device,
-        workers=4,
-        amp=True,
-        project=project,
-        name=name,
-    )
+    # Prepare training arguments
+    train_args = {
+        "data": str(dataset_path / "dataset.yaml"),
+        "epochs": epochs,
+        "imgsz": image_size,
+        "batch": batch_size,
+        "device": device,
+        "workers": 4,
+        "amp": True,
+        "project": project,
+        "name": name,
+    }
+    
+    # Add fine-tuning specific parameters
+    if finetune_mode:
+        if finetune_lr is not None:
+            train_args["lr0"] = finetune_lr
+            print(f"Using fine-tuning learning rate: {finetune_lr}")
+        
+        if freeze_backbone:
+            # Freeze backbone layers (layers 0-9 typically for YOLOv8)
+            train_args["freeze"] = list(range(10))
+            print("Freezing backbone layers for fine-tuning")
 
-    return model, results, Path(project) / name
+    results = model.train(**train_args)
+
+    return model, results, Path(project) / name, experiment_name
 
 
 def process_data(
@@ -95,7 +138,8 @@ def process_data(
     test_split,
     augment_multiplier,
     custom_classes=None,
-    use_coco_classes=True
+    use_coco_classes=True,
+    folder_subsets=None
 ):
     """
     Process image data for training and validation.
@@ -109,6 +153,7 @@ def process_data(
         augment_multiplier (int): Augmentation multiplier.
         custom_classes (list): List of custom class names.
         use_coco_classes (bool): Whether to use COCO classes when custom_classes is empty.
+        folder_subsets (dict): Dictionary mapping folder names to subset ratios (0.0-1.0).
 
     Returns:
         int, int, int: Total frames for training, validation and test.
@@ -116,7 +161,7 @@ def process_data(
     if image_input_path.exists():
         return process_single_images(
             image_input_path, train_output_path, test_output_path, val_split, test_split, 
-            augment_multiplier, custom_classes, use_coco_classes
+            augment_multiplier, custom_classes, use_coco_classes, folder_subsets
         )
     return 0, 0, 0
 
@@ -141,6 +186,31 @@ def run_prepare_stage(args):
     
     # Load class configuration
     custom_classes, use_coco_classes = load_class_config()
+    
+    # Load folder subset configuration
+    folder_subsets = load_folder_subset_config()
+    
+    # Override with command-line arguments if provided
+    if args.folder_subset:
+        print("Overriding folder subset configuration with command-line arguments:")
+        for folder_name, ratio_str in args.folder_subset:
+            try:
+                ratio = float(ratio_str)
+                if ratio > 0:
+                    folder_subsets[folder_name] = ratio
+                    if ratio > 1:
+                        print(f"  {folder_name}: {ratio*100:.1f}% (oversampling)")
+                    else:
+                        print(f"  {folder_name}: {ratio*100:.1f}%")
+                else:
+                    print(f"  Warning: Invalid ratio {ratio} for {folder_name}. Must be > 0.")
+            except ValueError:
+                print(f"  Warning: Invalid ratio '{ratio_str}' for {folder_name}. Must be a number.")
+    
+    if folder_subsets:
+        print(f"Final folder subset configuration: {folder_subsets}")
+    else:
+        print("No folder subset configuration found. Using all images from all folders.")
 
     if custom_classes and use_coco_classes:
         raise ValueError(
@@ -204,7 +274,8 @@ def run_prepare_stage(args):
             test_split=test_split,
             augment_multiplier=augment_multiplier,
             custom_classes=custom_classes,
-            use_coco_classes=use_coco_classes
+            use_coco_classes=use_coco_classes,
+            folder_subsets=folder_subsets
         )
 
         create_dataset_yaml(training_path, custom_classes, use_coco_classes)
@@ -220,7 +291,8 @@ def run_prepare_stage(args):
                 test_split=0,
                 augment_multiplier=1,
                 custom_classes=custom_classes,
-                use_coco_classes=use_coco_classes
+                use_coco_classes=use_coco_classes,
+                folder_subsets={}  # Don't apply subsets to test data
             )
 
         create_dataset_yaml(test_path, custom_classes, use_coco_classes)
@@ -250,6 +322,29 @@ def run_train_eval_stage(args):
     batch_size = int(args.batch_size)
     val_split = float(args.val_split)
 
+    # Load fine-tuning parameters from params.yaml
+    try:
+        with open("params.yaml", "r") as f:
+            params = yaml.safe_load(f)
+        
+        train_params = params.get("train", {})
+        finetune_mode = train_params.get("finetune_mode", False)
+        pretrained_model_path = train_params.get("pretrained_model_path", None)
+        finetune_lr = train_params.get("finetune_lr", None)
+        finetune_epochs = train_params.get("finetune_epochs", None)
+        freeze_backbone = train_params.get("freeze_backbone", False)
+        
+        # Use fine-tuning epochs if in fine-tuning mode and specified
+        if finetune_mode and finetune_epochs is not None:
+            train_epochs = finetune_epochs
+            print(f"Fine-tuning mode: Using {finetune_epochs} epochs")
+            
+    except Exception as e:
+        print(f"Warning: Could not load fine-tuning params from params.yaml: {e}")
+        finetune_mode = False
+        pretrained_model_path = None
+        finetune_lr = None
+        freeze_backbone = False
 
     # Define paths
     dataset_name = Path(args.dataset_name)
@@ -258,36 +353,51 @@ def run_train_eval_stage(args):
     test_path = dataset_path / "test"
 
     # Train the model
-    model, results, train_output_dir = train_model(
+    model, results, train_output_dir, final_experiment_name = train_model(
         training_path,
         model_size,
         image_size,
         batch_size,
         experiment_name,
         epochs=train_epochs,
+        finetune_mode=finetune_mode,
+        pretrained_model_path=pretrained_model_path,
+        finetune_lr=finetune_lr,
+        freeze_backbone=freeze_backbone,
     )
 
-    # Evaluate and log results for the original model
+    # Determine baseline model for comparison
+    if finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
+        baseline_model = YOLO(pretrained_model_path)
+        baseline_name = f"{experiment_name}-pretrained"
+    else:
+        baseline_model = YOLO(f"yolov8{model_size}.pt")
+        baseline_name = experiment_name
+
+    # Evaluate and log results for the baseline model
     evaluate_and_log_model_results(
-        model=YOLO(f"yolov8{model_size}.pt"),
-        model_name=experiment_name,
+        model=baseline_model,
+        model_name=baseline_name,
         test_path=test_path,
         image_size=image_size,
         output_dir=train_output_dir,
         val_split=val_split,
         train_epochs=0,
         is_original=True,
+        baseline_model=None,  # Don't pass baseline for the baseline evaluation
     )
 
-    # Evaluate and log results for the retrained model
+    # Evaluate and log results for the trained/fine-tuned model
+    # Note: final_experiment_name includes the "-finetune" suffix if in fine-tuning mode
     retrained_metadata = evaluate_and_log_model_results(
         model=model,
-        model_name=experiment_name,
+        model_name=final_experiment_name,
         test_path=test_path,
         image_size=image_size,
         output_dir=train_output_dir,
         val_split=val_split,
         train_epochs=train_epochs,
+        baseline_model=baseline_model,  # Pass the correct baseline model
     )
 
     # Organize output files
@@ -295,7 +405,7 @@ def run_train_eval_stage(args):
 
     # Generate side-by-side comparisons
     generate_side_by_side_comparisons(
-        original_model=YOLO(f"yolov8{model_size}.pt"),
+        original_model=baseline_model,
         retrained_model=model,
         test_img_dir=test_path / "val" / "images",
         output_dir=train_output_dir,
@@ -359,6 +469,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--augment-multiplier", type=int, default=1, 
         help="By which factor the training data will be multiplied with augmented data. Default is 1, meaning there is no added augmentation by default."
+    )
+    parser.add_argument(
+        "--folder-subset", action="append", nargs=2, metavar=('FOLDER', 'RATIO'),
+        help="Use subset/oversample images from specific folders. Format: --folder-subset uavvaste 0.5 (50%%) --folder-subset small_dataset 2.0 (200%% = oversample)"
     )
     args = parser.parse_args()
 
