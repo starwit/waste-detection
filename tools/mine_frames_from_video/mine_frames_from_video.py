@@ -77,14 +77,14 @@ def get_video_meta(path: Path) -> Tuple[Optional[int], Optional[float]]:
 
 class SelectorUI:
     """Minimal Tkinter UI to select inputs and options before playback."""
-    def __init__(self, root, prefill_snippets_dir: Optional[str] = None, prefill_weights: Optional[str] = None):
+    def __init__(self, root, prefill_snippets_dir: Optional[str] = None, prefill_weights: Optional[str] = None, prefill_output_dir: Optional[str] = None):
         self.root = root
         self.root.title("Mine Frames from Video - Setup")
         self.root.geometry("900x560")
 
         self.snippets_dir_var = tk.StringVar(value=prefill_snippets_dir or "")
         self.weights_var = tk.StringVar(value=prefill_weights or "")
-        self.output_dir_var = tk.StringVar()
+        self.output_dir_var = tk.StringVar(value=prefill_output_dir or "")
         self.skip_after_var = tk.IntVar(value=0)
         self.precompute_var = tk.BooleanVar(value=False)
 
@@ -249,16 +249,25 @@ class DiskCache:
         base = f"{video_path.stem}__{weights_path.stem}"
         self.npz_path = video_path.parent / f"{base}.preds.npz"
         self.meta_path = video_path.parent / f"{base}.meta.json"
-        self._npz = None
         self._meta = None
+        # In-memory arrays (Option A)
+        self._boxes: Optional[np.ndarray] = None
+        self._confs: Optional[np.ndarray] = None
+        self._clss: Optional[np.ndarray] = None
+        self._indptr: Optional[np.ndarray] = None
 
     def exists(self) -> bool:
         """True if both `.npz` and `.meta.json` exist."""
         return self.npz_path.exists() and self.meta_path.exists()
 
     def load(self):
-        """Load compressed arrays + metadata; returns self."""
-        self._npz = np.load(self.npz_path, allow_pickle=False)
+        """Load compressed arrays + metadata ONCE into RAM; returns self."""
+        # Read arrays one time to avoid per-frame unzip cost.
+        with np.load(self.npz_path, allow_pickle=False) as z:
+            self._boxes = z["boxes"]
+            self._confs = z["confs"]
+            self._clss = z["clss"]
+            self._indptr = z["indptr"]
         with open(self.meta_path, "r") as f:
             self._meta = json.load(f)
         return self
@@ -316,18 +325,14 @@ class DiskCache:
             json.dump(meta, f)
 
     def get_frame_dets(self, frame_idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Return (boxes, confs, clss) for the given frame index from cache."""
-        if self._npz is None:
+        """Return (boxes, confs, clss) for the given frame index from in-memory arrays."""
+        if self._boxes is None or self._indptr is None or self._confs is None or self._clss is None:
             raise RuntimeError("Cache not loaded")
-        boxes = self._npz["boxes"]
-        confs = self._npz["confs"]
-        clss = self._npz["clss"]
-        indptr = self._npz["indptr"]
-        if frame_idx < 0 or frame_idx + 1 >= indptr.shape[0]:
-            return boxes[:0], confs[:0], clss[:0]
-        start = int(indptr[frame_idx])
-        end = int(indptr[frame_idx + 1])
-        return boxes[start:end], confs[start:end], clss[start:end]
+        if frame_idx < 0 or frame_idx + 1 >= self._indptr.shape[0]:
+            return self._boxes[:0], self._confs[:0], self._clss[:0]
+        start = int(self._indptr[frame_idx])
+        end = int(self._indptr[frame_idx + 1])
+        return self._boxes[start:end], self._confs[start:end], self._clss[start:end]
 
     @property
     def meta(self):
@@ -361,6 +366,10 @@ class Player:
 
         self.total = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0) or 30.0
+        # Cache width/height once to avoid per-frame queries
+        self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
         self.paused = False
         self.overlay = True
         self.playback_speed = 1.0
@@ -404,8 +413,8 @@ class Player:
             self.cache = cache.load()
             return
         print("Precomputing detections and saving cache to disk …")
-        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        width = self.width
+        height = self.height
         fps = self.fps
         total = self.total
         # Use very low conf to retain candidates during precompute
@@ -495,9 +504,9 @@ class Player:
         boxes_n, confs_n, clss_n = self.cache.get_frame_dets(frame_idx)
         if boxes_n.shape[0] == 0:
             return []
-        # Convert normalized to pixel coords
-        w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Convert normalized to pixel coords using cached width/height
+        w = self.width
+        h = self.height
         preds: List[Dict] = []
         for i in range(boxes_n.shape[0]):
             if float(confs_n[i]) < self.conf:
@@ -516,8 +525,8 @@ class Player:
         return preds
 
     def _get_predictions(self, frame_idx: int, frame_bgr: np.ndarray) -> List[Dict]:
-        """Return cached or live predictions based on current mode/settings."""
-        if self.precompute and self.cache is not None:
+        """Return cached or live predictions based on cache availability."""
+        if self.cache is not None:
             return self._preds_from_cache(frame_idx)
         return self._infer(frame_bgr)
 
@@ -611,32 +620,49 @@ class Player:
         return out
 
     def run(self):
-        """Main loop: read frames, get predictions, render, and handle hotkeys."""
+        """Main loop: read frames, get predictions, render, and handle hotkeys. Includes timing debug prints."""
+        import time
         frame_idx = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
         delay_ms = int(max(1, 1000 / max(1e-6, self.fps) / self.playback_speed))
 
         while True:
+            t0 = time.time()
             if not self.paused:
+                t_read0 = time.time()
                 ret, frame = self.cap.read()
+                t_read1 = time.time()
                 if not ret:
                     break
                 frame_idx = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
                 self._last_raw = frame.copy()
+                t_pred0 = time.time()
                 preds = self._get_predictions(frame_idx, frame)
+                t_pred1 = time.time()
                 self._last_preds = preds
+                t_overlay0 = time.time()
                 disp = self._draw_overlays(frame, preds) if self.overlay else frame
+                t_overlay1 = time.time()
                 self._update_pos_trackbar(frame_idx)
             else:
                 if self._last_raw is None:
+                    t_read0 = time.time()
                     ret, frame = self.cap.read()
+                    t_read1 = time.time()
                     if not ret:
                         break
                     frame_idx = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
                     self._last_raw = frame.copy()
+                    t_pred0 = time.time()
                     self._last_preds = self._get_predictions(frame_idx, frame)
+                    t_pred1 = time.time()
+                else:
+                    t_read0 = t_read1 = t_pred0 = t_pred1 = time.time()
+                t_overlay0 = time.time()
                 disp = self._draw_overlays(self._last_raw, self._last_preds) if self.overlay else self._last_raw
+                t_overlay1 = time.time()
 
             # HUD
+            t_hud0 = time.time()
             hud = disp.copy()
             cache_txt = "CACHE" if self.cache is not None else "LIVE"
             tag_txt = f"TAG: {self.current_tag}" if self.current_tag else "TAG: -"
@@ -647,7 +673,13 @@ class Player:
             cv2.putText(hud, "Press H for help", (10, hud.shape[0] - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
             if self.show_help:
                 hud = self._draw_help(hud)
+            t_hud1 = time.time()
+            t_disp0 = time.time()
             cv2.imshow(self.window, hud)
+            t_disp1 = time.time()
+
+            # Print timing debug info
+            print(f"[DEBUG] frame={frame_idx} read={t_read1-t_read0:.4f}s pred={t_pred1-t_pred0:.4f}s overlay={t_overlay1-t_overlay0:.4f}s hud={t_hud1-t_hud0:.4f}s disp={t_disp1-t_disp0:.4f}s total={t_disp1-t0:.4f}s")
 
             key = cv2.waitKey(delay_ms if not self.paused else 30) & 0xFF
             if key == 27:  # ESC
@@ -716,13 +748,13 @@ class Player:
         cv2.destroyAllWindows()
 
 
-def run_gui_and_play(prefill_snippets_dir: Optional[str] = None, prefill_weights: Optional[str] = None):
+def run_gui_and_play(prefill_snippets_dir: Optional[str] = None, prefill_weights: Optional[str] = None, prefill_output_dir: Optional[str] = None):
     """Launch the Tkinter selector (if available) and start the player. Optionally prefill paths."""
     if tk is None:
         print("GUI libraries not available in this environment.")
         return
     root = tk.Tk()
-    ui = SelectorUI(root, prefill_snippets_dir=prefill_snippets_dir, prefill_weights=prefill_weights)
+    ui = SelectorUI(root, prefill_snippets_dir=prefill_snippets_dir, prefill_weights=prefill_weights, prefill_output_dir=prefill_output_dir)
     root.mainloop()
     sel = ui.get_selection()
     root.destroy()
@@ -849,7 +881,7 @@ def main():
     parser = argparse.ArgumentParser(description="Review or precompute detections for hard-example mining")
     parser.add_argument("--batch-precompute", action="store_true", help="Run headless precompute over a folder of videos")
     parser.add_argument("--input-dir", type=Path, help="Input directory with videos for precompute")
-    parser.add_argument("--pattern", type=str, default="*.mkv", help="Globbing pattern for videos, e.g., *.mp4 or **/*.mp4")
+    parser.add_argument("--pattern", type=str, default="*.mp4", help="Globbing pattern for videos, e.g., *.mp4 or **/*.mp4")
     parser.add_argument("--weights", type=Path, help="YOLO weights .pt path (required for precompute)")
     parser.add_argument("--force", action="store_true", help="Recompute caches even if they already exist")
     parser.add_argument("--output-dir", type=Path, help="Directory to save output videos and label files (for download)")
@@ -874,7 +906,12 @@ def main():
     # GUI mode, optionally prefill weights and input-dir
     prefill_snippets_dir = str(args.input_dir) if args.input_dir else None
     prefill_weights = str(args.weights) if args.weights else None
-    run_gui_and_play(prefill_snippets_dir=prefill_snippets_dir, prefill_weights=prefill_weights)
+    prefill_output_dir = str(args.output_dir) if args.output_dir else None
+    run_gui_and_play(
+        prefill_snippets_dir=prefill_snippets_dir,
+        prefill_weights=prefill_weights,
+        prefill_output_dir=prefill_output_dir
+    )
 
 
 if __name__ == "__main__":
