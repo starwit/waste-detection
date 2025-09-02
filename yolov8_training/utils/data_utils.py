@@ -8,7 +8,7 @@ import numpy as np
 import re
 import yaml
 import csv
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Set
 
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
@@ -216,6 +216,248 @@ def remap_yaml_dataset_labels(dataset_dir: Path, target_class_mapping: dict) -> 
 
         with open(label_file, "w") as f:
             f.writelines(new_lines)
+
+
+# ------------------------------- helpers ---------------------------------
+
+def _apply_subset_sampling(
+    folder_name: str,
+    pairs: List[Tuple[Path, Path, str]],
+    subset_ratio: float
+) -> List[Tuple[Path, Path, str]]:
+    if subset_ratio > 1:
+        original_count = len(pairs)
+        oversample_factor = int(subset_ratio)
+        remainder = subset_ratio - oversample_factor
+        oversampled_pairs = pairs * oversample_factor
+        if remainder > 0:
+            pairs_copy = pairs.copy()
+            random.shuffle(pairs_copy)
+            partial_count = int(len(pairs) * remainder)
+            oversampled_pairs.extend(pairs_copy[:partial_count])
+        print(
+            f"Folder '{folder_name}': Oversampled to "
+            f"{len(oversampled_pairs)} images from {original_count} "
+            f"({subset_ratio*100:.1f}%)"
+        )
+        return oversampled_pairs
+
+    elif 0 < subset_ratio < 1:
+        original_count = len(pairs)
+        pairs_copy = pairs.copy()
+        random.shuffle(pairs_copy)
+        subset_count = int(len(pairs) * subset_ratio)
+        print(
+            f"Folder '{folder_name}': Using {subset_count}/"
+            f"{original_count} images ({subset_ratio*100:.1f}%)"
+        )
+        return pairs_copy[:subset_count]
+
+    elif subset_ratio == 1:
+        print(
+            f"Folder '{folder_name}': Using all "
+            f"{len(pairs)} images (100%)"
+        )
+        return pairs
+
+    else:
+        print(
+            f"Warning: Invalid subset ratio {subset_ratio} "
+            f"for folder '{folder_name}'. Must be > 0."
+        )
+        return pairs
+
+
+def _process_cvat_folder(
+    some_folder: Path,
+    folder_to_process: Path,
+    scene_name: str,
+    target_class_mapping: Dict[int, str],
+    folder_subsets: Dict[str, float],
+    temp_folders: List[Path],
+) -> Tuple[List[Tuple[Path, Path, str]], List[Path], int, int]:
+    folder_pairs: List[Tuple[Path, Path, str]] = []
+    empty_label_count = 0
+    skip_count = 0
+
+    train_txt = folder_to_process / "train.txt"
+    with open(train_txt, "r") as f:
+        image_paths = [line.strip() for line in f.readlines()]
+
+    for image_rel_path in image_paths:
+        path = Path(image_rel_path)
+        image_rel_path = Path(*path.parts[1:])  # remove leading 'data'
+
+        image_path = folder_to_process / image_rel_path
+
+        label_rel_path = Path("labels") / image_rel_path.relative_to("images").with_suffix(".txt")
+        label_path = folder_to_process / label_rel_path
+
+        if image_path.exists():
+            if not label_path.exists() or label_path.stat().st_size == 0:
+                label_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(label_path, "w") as f:
+                    pass
+                empty_label_count += 1
+            convert_polygons_to_bboxes_inplace(label_path)
+            folder_pairs.append((image_path, label_path, scene_name))
+        else:
+            skip_count += 1
+
+    if (folder_to_process / "data.yaml").exists():
+        temp_folder = some_folder.parent / f"{some_folder.name}_temp"
+        shutil.copytree(folder_to_process, temp_folder)
+        temp_folders.append(temp_folder)  # Append immediately after creation
+        try:
+            remap_yaml_dataset_labels(temp_folder, target_class_mapping)
+            # Use robust path remapping
+            folder_pairs = [
+                (
+                    temp_folder.joinpath(img.relative_to(folder_to_process)),
+                    temp_folder.joinpath(lbl.relative_to(folder_to_process)),
+                    scene_name,
+                )
+                for img, lbl, scene_name in folder_pairs
+            ]
+        except Exception:
+            # Remove orphaned temp_folder and re-raise
+            try:
+                shutil.rmtree(temp_folder)
+            except Exception as cleanup_exc:
+                print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
+            temp_folders.remove(temp_folder)
+            raise
+
+    folder_name = some_folder.name
+    if folder_name in folder_subsets:
+        folder_pairs = _apply_subset_sampling(folder_name, folder_pairs, folder_subsets[folder_name])
+
+    return folder_pairs, temp_folders, empty_label_count, skip_count
+
+
+def _process_manual_folder(
+    some_folder: Path,
+    folder_to_process: Path,
+    scene_name: str,
+    target_class_mapping: Dict[int, str],
+    folder_subsets: Dict[str, float],
+    temp_folders: List[Path],
+) -> Tuple[List[Tuple[Path, Path, str]], List[Path], int]:
+    temp_pairs: List[Tuple[Path, Path, str]] = []
+    empty_label_count = 0
+
+    images_folder = folder_to_process / "images"
+    labels_folder = folder_to_process / "labels"
+    if not images_folder.exists():
+        print(f"Skipping {folder_to_process.name}: Missing 'images' folder.")
+        return [], temp_folders, empty_label_count
+
+    if not labels_folder.exists():
+        labels_folder.mkdir(parents=True, exist_ok=True)
+
+    for image_file in sorted_glob(images_folder.glob("*")):
+        if image_file.is_file() and image_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]:
+            label_file = labels_folder / image_file.with_suffix(".txt").name
+            if not label_file.exists() or label_file.stat().st_size == 0:
+                with open(label_file, "w") as f:
+                    pass
+                empty_label_count += 1
+            convert_polygons_to_bboxes_inplace(label_file)
+            temp_pairs.append((image_file, label_file, scene_name))
+
+    data_yaml_path = folder_to_process / "data.yaml"
+    if data_yaml_path.exists():
+        print(f"Found data.yaml in manual structure: {folder_to_process.name}")
+        try:
+            with open(data_yaml_path, "r") as f:
+                yaml_config = yaml.safe_load(f)
+            if "names" not in yaml_config:
+                raise ValueError("data.yaml missing 'names' section")
+            yaml_classes = yaml_config["names"]
+            mapping = map_class_names_to_ids(yaml_classes, target_class_mapping)
+            if not mapping:
+                print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
+                if isinstance(yaml_classes, list):
+                    source_classes = yaml_classes
+                else:
+                    source_classes = list(yaml_classes.values())
+                print(f"Source classes: {source_classes}")
+                print(f"Target classes: {list(target_class_mapping.values())}")
+            temp_folder = some_folder.parent / f"{some_folder.name}_temp"
+            shutil.copytree(folder_to_process, temp_folder)
+            remap_yaml_dataset_labels(temp_folder, target_class_mapping)
+            temp_folders.append(temp_folder)
+            temp_pairs = [
+                (
+                    Path(str(img).replace(str(folder_to_process), str(temp_folder))),
+                    Path(str(lbl).replace(str(folder_to_process), str(temp_folder))),
+                    scene_name,
+                )
+                for img, lbl, scene_name in temp_pairs
+            ]
+        except Exception as e:
+            print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
+            print("Continuing without class mapping for this folder.")
+
+    folder_name = some_folder.name
+    if folder_name in folder_subsets:
+        temp_pairs = _apply_subset_sampling(folder_name, temp_pairs, folder_subsets[folder_name])
+
+    return temp_pairs, temp_folders, empty_label_count
+
+
+def _dedupe_pairs(
+    image_label_pairs: List[Tuple[Path, Path, str]],
+    folder_subsets: Dict[str, float]
+) -> List[Tuple[Path, Path, str]]:
+    detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
+    folder_groups: Dict[str, List[Tuple[Path, Path, str]]] = {}
+    for img_path, lbl_path, scene_name in image_label_pairs:
+        folder_groups.setdefault(scene_name, []).append((img_path, lbl_path, scene_name))
+
+    oversampled_folders: Set[str] = {
+        folder_name for folder_name in folder_subsets.keys() if folder_subsets[folder_name] > 1
+    }
+
+    processed_pairs: List[Tuple[Path, Path, str]] = []
+    unique_images_per_folder: Dict[str, Set[Path]] = {}
+
+    for folder_name, folder_pairs in folder_groups.items():
+        folder_images = [img_path for img_path, _, _ in folder_pairs]
+        if folder_name in oversampled_folders:
+            print(f"Folder '{folder_name}': Keeping all {len(folder_pairs)} images (oversampled folder)")
+            processed_pairs.extend(folder_pairs)
+            unique_images_per_folder[folder_name] = set(detector.get_unique_images(folder_images))
+        else:
+            clusters = detector.find_duplicates(folder_images)
+            if clusters:
+                print(f"Found {len(clusters)} duplicate clusters in folder '{folder_name}':")
+                detector.print_duplicate_clusters(clusters)
+            unique_folder_images = set(detector.get_unique_images(folder_images))
+            unique_folder_pairs = [(img, lbl, scene) for img, lbl, scene in folder_pairs if img in unique_folder_images]
+            print(f"Folder '{folder_name}': {len(unique_folder_pairs)}/{len(folder_pairs)} unique images after duplicate removal")
+            processed_pairs.extend(unique_folder_pairs)
+            unique_images_per_folder[folder_name] = unique_folder_images
+
+    if len(folder_groups) > 1:
+        print("\nChecking for duplicates between different folders...")
+        all_unique_images: List[Path] = []
+        for _folder_name, unique_images in unique_images_per_folder.items():
+            all_unique_images.extend(list(unique_images))
+        cross_clusters = detector.find_duplicates(all_unique_images)
+        if cross_clusters:
+            print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
+            detector.print_duplicate_clusters(cross_clusters)
+            cross_unique_images = set(detector.get_unique_images(all_unique_images))
+            processed_pairs = [
+                (img_path, lbl_path, scene_name)
+                for img_path, lbl_path, scene_name in processed_pairs
+                if img_path in cross_unique_images
+            ]
+        else:
+            print("No duplicates found between different folders")
+
+    return processed_pairs
 
 
 def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True):
@@ -502,225 +744,30 @@ def process_single_images(
 
         folder_to_process = some_folder
         scene_name = some_folder.name  # Extract scene name from folder name
-
         # Check if this is a CVAT export folder with train.txt
         train_txt = folder_to_process / "train.txt"
         if train_txt.exists():
-            # Process CVAT export format
-            folder_pairs = []  # Collect pairs for this folder
-            with open(train_txt, "r") as f:
-                image_paths = [line.strip() for line in f.readlines()]
-
-            # Get the base directory for images and labels
-            for image_rel_path in image_paths:
-                # paths in the train.txt includes unnecessary 'data' folder prefix, which needs to be removed
-                path = Path(image_rel_path)
-                image_rel_path = Path(*path.parts[1:])
-
-                # Convert relative path to absolute path
-                image_path = folder_to_process / image_rel_path
-
-                # Construct corresponding label path
-                # Replace 'images' with 'labels' and change extension to .txt
-                label_rel_path = Path("labels") / image_rel_path.relative_to(
-                    "images"
-                ).with_suffix(".txt")
-                label_path = folder_to_process / label_rel_path
-
-                 # Include image if it exists, even if label doesn't exist or is empty
-                if image_path.exists():
-                    if not label_path.exists() or label_path.stat().st_size == 0:
-                        # Ensure parent directories exist
-                        label_path.parent.mkdir(parents=True, exist_ok=True)
-                        # Create empty label file if needed
-                        with open(label_path, "w") as f:
-                            pass
-                        empty_label_count += 1
-
-                    convert_polygons_to_bboxes_inplace(label_path)
-                    folder_pairs.append((image_path, label_path, scene_name))
-                else:
-                    skip_count += 1
-
-            # Remap labels if data.yaml exists
-            if (folder_to_process / "data.yaml").exists():
-                temp_folder = some_folder.parent / f"{some_folder.name}_temp"
-                shutil.copytree(folder_to_process, temp_folder)
-                remap_yaml_dataset_labels(temp_folder, target_class_mapping)
-                temp_folders.append(temp_folder)
-
-                # Update paths to use temp folder
-                folder_pairs = [
-                    (
-                        Path(
-                            str(img_path).replace(
-                                str(folder_to_process), str(temp_folder)
-                            )
-                        ),
-                        Path(
-                            str(lbl_path).replace(
-                                str(folder_to_process), str(temp_folder)
-                            )
-                        ),
-                        scene_name,
-                    )
-                    for img_path, lbl_path, scene_name in folder_pairs
-                ]
-            
-            # Apply folder subset sampling or oversampling if configured
-            folder_name = some_folder.name
-            if folder_name in folder_subsets:
-                subset_ratio = folder_subsets[folder_name]
-                if subset_ratio > 1:
-                    # Oversampling case
-                    original_count = len(folder_pairs)
-                    oversample_factor = int(subset_ratio)
-                    remainder = subset_ratio - oversample_factor
-                    
-                    # Create copies for full oversampling
-                    oversampled_pairs = folder_pairs * oversample_factor
-                    
-                    # Add partial oversampling if there's a remainder
-                    if remainder > 0:
-                        random.shuffle(folder_pairs)
-                        partial_count = int(len(folder_pairs) * remainder)
-                        oversampled_pairs.extend(folder_pairs[:partial_count])
-                    
-                    folder_pairs = oversampled_pairs
-                    print(f"Folder '{folder_name}': Oversampled to {len(folder_pairs)} images from {original_count} ({subset_ratio*100:.1f}%)")
-                    
-                elif 0 < subset_ratio < 1:
-                    # Subsampling case
-                    original_count = len(folder_pairs)
-                    # Randomly sample the specified percentage
-                    random.shuffle(folder_pairs)
-                    subset_count = int(len(folder_pairs) * subset_ratio)
-                    folder_pairs = folder_pairs[:subset_count]
-                    print(f"Folder '{folder_name}': Using {subset_count}/{original_count} images ({subset_ratio*100:.1f}%)")
-                elif subset_ratio == 1:
-                    print(f"Folder '{folder_name}': Using all {len(folder_pairs)} images (100%)")
-                else:
-                    print(f"Warning: Invalid subset ratio {subset_ratio} for folder '{folder_name}'. Must be > 0.")
-            
-            # Add pairs from this folder to the main list
+            folder_pairs, temp_folders, ec, sc = _process_cvat_folder(
+                some_folder,
+                folder_to_process,
+                scene_name,
+                target_class_mapping,
+                folder_subsets,
+                temp_folders,
+            )
+            empty_label_count += ec
+            skip_count += sc
             image_label_pairs.extend(folder_pairs)
         else:
-            # Manual dataset structure with images/ and labels/ folders
-            images_folder = folder_to_process / "images"
-            labels_folder = folder_to_process / "labels"
-
-            if not images_folder.exists():
-                print(f"Skipping {folder_to_process.name}: Missing 'images' folder.")
-                continue
-
-            # Create labels folder if it doesn't exist
-            if not labels_folder.exists():
-                labels_folder.mkdir(parents=True, exist_ok=True)
-
-            # Collect valid image-label pairs
-            temp_pairs = []
-            for image_file in sorted_glob(images_folder.glob("*")):
-                if image_file.is_file() and image_file.suffix.lower() in [
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".bmp",
-                ]:
-                    label_file = labels_folder / image_file.with_suffix(".txt").name
-
-                    # Include all images, creating empty label files if needed
-                    if not label_file.exists() or label_file.stat().st_size == 0:
-                        with open(label_file, "w") as f:
-                            pass
-                        empty_label_count += 1
-
-                    convert_polygons_to_bboxes_inplace(label_file)
-                    temp_pairs.append((image_file, label_file, scene_name))
-
-            # Check if this manual structure has a data.yaml for class mapping
-            data_yaml_path = folder_to_process / "data.yaml"
-            if data_yaml_path.exists():
-                print(f"Found data.yaml in manual structure: {folder_to_process.name}")
-                
-                # Validate the data.yaml has class names that can be mapped
-                try:
-                    with open(data_yaml_path, "r") as f:
-                        yaml_config = yaml.safe_load(f)
-                    
-                    if "names" not in yaml_config:
-                        raise ValueError("data.yaml missing 'names' section")
-                    
-                    # Check if we can map any classes
-                    yaml_classes = yaml_config["names"]
-                    mapping = map_class_names_to_ids(yaml_classes, target_class_mapping)
-                    
-                    if not mapping:
-                        print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
-                        # Handle both dict and list formats for displaying source classes
-                        if isinstance(yaml_classes, list):
-                            source_classes = yaml_classes
-                        else:
-                            source_classes = list(yaml_classes.values())
-                        print(f"Source classes: {source_classes}")
-                        print(f"Target classes: {list(target_class_mapping.values())}")
-                        # Still process the data but labels may be filtered out
-                    
-                    # Create temp folder and remap labels
-                    temp_folder = some_folder.parent / f"{some_folder.name}_temp"
-                    shutil.copytree(folder_to_process, temp_folder)
-                    remap_yaml_dataset_labels(temp_folder, target_class_mapping)
-                    temp_folders.append(temp_folder)
-
-                    # Update paths to use temp folder
-                    temp_pairs = [
-                        (
-                            Path(str(img_path).replace(str(folder_to_process), str(temp_folder))),
-                            Path(str(lbl_path).replace(str(folder_to_process), str(temp_folder))),
-                            scene_name,
-                        )
-                        for img_path, lbl_path, scene_name in temp_pairs
-                    ]
-                    
-                except Exception as e:
-                    print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
-                    print("Continuing without class mapping for this folder.")
-            
-            # Add all pairs from this folder
-            # Apply folder subset sampling or oversampling if configured
-            folder_name = some_folder.name
-            if folder_name in folder_subsets:
-                subset_ratio = folder_subsets[folder_name]
-                if subset_ratio > 1:
-                    # Oversampling case
-                    original_count = len(temp_pairs)
-                    oversample_factor = int(subset_ratio)
-                    remainder = subset_ratio - oversample_factor
-                    
-                    # Create copies for full oversampling
-                    oversampled_pairs = temp_pairs * oversample_factor
-                    
-                    # Add partial oversampling if there's a remainder
-                    if remainder > 0:
-                        random.shuffle(temp_pairs)
-                        partial_count = int(len(temp_pairs) * remainder)
-                        oversampled_pairs.extend(temp_pairs[:partial_count])
-                    
-                    temp_pairs = oversampled_pairs
-                    print(f"Folder '{folder_name}': Oversampled to {len(temp_pairs)} images from {original_count} ({subset_ratio*100:.1f}%)")
-                    
-                elif 0 < subset_ratio < 1:
-                    # Subsampling case
-                    original_count = len(temp_pairs)
-                    # Randomly sample the specified percentage
-                    random.shuffle(temp_pairs)
-                    subset_count = int(len(temp_pairs) * subset_ratio)
-                    temp_pairs = temp_pairs[:subset_count]
-                    print(f"Folder '{folder_name}': Using {subset_count}/{original_count} images ({subset_ratio*100:.1f}%)")
-                elif subset_ratio == 1:
-                    print(f"Folder '{folder_name}': Using all {len(temp_pairs)} images (100%)")
-                else:
-                    print(f"Warning: Invalid subset ratio {subset_ratio} for folder '{folder_name}'. Must be > 0.")
-            
+            temp_pairs, temp_folders, ec = _process_manual_folder(
+                some_folder,
+                folder_to_process,
+                scene_name,
+                target_class_mapping,
+                folder_subsets,
+                temp_folders,
+            )
+            empty_label_count += ec
             image_label_pairs.extend(temp_pairs)
 
     print(f"Included {empty_label_count} images with empty labels (no objects).")
@@ -734,86 +781,7 @@ def process_single_images(
         return 0, 0, 0
 
     print("Find duplicate images...")
-
-    # Initialize duplicate detector
-    detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
-
-    # Group images by their source folder
-    folder_groups = {}
-    for img_path, lbl_path, scene_name in image_label_pairs:
-        if scene_name not in folder_groups:
-            folder_groups[scene_name] = []
-        folder_groups[scene_name].append((img_path, lbl_path, scene_name))
-
-    # Check which folders have been oversampled
-    oversampled_folders = {
-        folder_name for folder_name in folder_subsets.keys() 
-        if folder_subsets[folder_name] > 1
-    }
-
-    # Process each folder
-    processed_pairs = []
-    unique_images_per_folder = {}  # Track unique images for cross-folder comparison
-    
-    for folder_name, folder_pairs in folder_groups.items():
-        folder_images = [img_path for img_path, _, _ in folder_pairs]
-        
-        if folder_name in oversampled_folders:
-            # For oversampled folders, keep all images (including intentional duplicates within folder)
-            print(f"Folder '{folder_name}': Keeping all {len(folder_pairs)} images (oversampled folder)")
-            processed_pairs.extend(folder_pairs)
-            
-            # For cross-folder duplicate detection, use only unique images from this folder
-            unique_folder_images = detector.get_unique_images(folder_images)
-            unique_images_per_folder[folder_name] = unique_folder_images
-            
-        else:
-            # For normal folders, remove duplicates within the folder
-            clusters = detector.find_duplicates(folder_images)
-            if clusters:
-                print(f"Found {len(clusters)} duplicate clusters in folder '{folder_name}':")
-                detector.print_duplicate_clusters(clusters)
-            
-            unique_folder_images = detector.get_unique_images(folder_images)
-            unique_folder_pairs = [
-                (img, lbl, scene) for img, lbl, scene in folder_pairs 
-                if img in unique_folder_images
-            ]
-            
-            print(f"Folder '{folder_name}': {len(unique_folder_pairs)}/{len(folder_pairs)} unique images after duplicate removal")
-            processed_pairs.extend(unique_folder_pairs)
-            unique_images_per_folder[folder_name] = unique_folder_images
-
-    # Check for duplicates between different folders (only if more than one folder)
-    if len(folder_groups) > 1:
-        print("\nChecking for duplicates between different folders...")
-
-        # Collect unique representative images from each folder
-        all_unique_images = []
-        for folder_name, unique_images in unique_images_per_folder.items():
-            all_unique_images.extend(unique_images)
-
-        # Find cross-folder duplicates
-        cross_clusters = detector.find_duplicates(all_unique_images)
-
-        if cross_clusters:
-            print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
-            detector.print_duplicate_clusters(cross_clusters)
-
-            # Images that are unique across all folders (kept representatives)
-            cross_unique_images = set(detector.get_unique_images(all_unique_images))
-
-            # Filter: keep only pairs whose image is a cross-folder unique representative
-            # For oversampled folders, this also keeps their oversampled copies
-            # only if the representative image itself is kept.
-            final_pairs = []
-            for img_path, lbl_path, scene_name in processed_pairs:
-                if img_path in cross_unique_images:
-                    final_pairs.append((img_path, lbl_path, scene_name))
-
-            processed_pairs = final_pairs
-        else:
-            print("No duplicates found between different folders")
+    processed_pairs = _dedupe_pairs(image_label_pairs, folder_subsets)
 
     print(f"\nOriginal number of images: {len(image_label_pairs)}")
     print(f"Number of images after smart duplicate removal: {len(processed_pairs)}")
