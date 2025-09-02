@@ -19,6 +19,7 @@ __pycache__
 *.cache
 *.pt
 
+
 # dataset-images
 datasets/*
 # !*/datasets/.gitkeep
@@ -41,3 +42,5 @@ Konsortialtreffen/*
 /results_comparison
 /runs
 /metrics.json
+
+WAS_videos/

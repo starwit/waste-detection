@@ -1,4 +1,3 @@
-
 # Waste Detection — YOLOv8 + DVC
 
 This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
@@ -13,7 +12,6 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 > - Task: waste detection
 > - Current classes (from params.yaml): `waste`, `cigarette` (to keep it focused for now and not introduce too many classes while we don't have much training data)
 > - Pipeline: Ultralytics YOLOv8 with DVC-managed data and outputs
-
 ---
 
 ## Table of Contents
@@ -23,6 +21,8 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 4. [Experiment Workflow](#experiment-workflow)
 5. [Custom Classes](#custom-classes)
 6. [Raw Data Structure](#raw-data-structure)
+7. [Fine-tuning](#fine-tuning)
+8. [Folder Subsets](#folder-subsets)
 
 ---
 
@@ -213,7 +213,7 @@ The importer now accepts **any** of the following:
 | 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
 | 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
 
-> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
+> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
 > The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
 Example scene‑based layout:
@@ -228,3 +228,54 @@ raw_data/
         ├── images/
         └── labels/
 ```
+
+## Fine-tuning
+
+You can fine-tune from a pre-trained checkpoint (e.g., a prior waste model) instead of starting from the base YOLOv8 weights.
+
+Configure in `params.yaml` under `train`:
+
+```yaml
+train:
+  finetune_mode: true              # enable fine-tuning
+  pretrained_model_path: taco-uav-model.pt
+  finetune_lr: 0.0001              # lower LR for fine-tuning
+  finetune_epochs: 60              # optional override for epochs
+  freeze_backbone: false           # optionally freeze early layers
+```
+
+Notes:
+- When fine-tuning, the pipeline evaluates the chosen pretrained model as the baseline and compares it to the fine-tuned result.
+- The DVC pipeline depends on `pretrained_model_path` so runs are reproducible. Make sure the file is available (via DVC or local path).
+
+---
+
+## Folder Subsets
+
+To limit or oversample specific source folders during dataset preparation, use `prepare.folder_subsets` in `params.yaml` or the CLI override.
+
+Example `params.yaml` configuration:
+
+```yaml
+prepare:
+  val_split: 0.1
+  test_split: 0.1
+  augment_multiplier: 1
+  folder_subsets:
+    uavvaste: 0.5        # use 50% of images from this folder
+    taco: 0.2            # use 20%
+    cw32-08-07-train: 2  # 200% = oversample
+```
+
+CLI override (multiple allowed):
+
+```bash
+python yolov8_training/train_pipeline.py \
+  --stage prepare -d waste-detection \
+  --folder-subset uavvaste 0.5 \
+  --folder-subset cw32-08-07-train 2.0
+```
+
+Behavior:
+- Ratios between 0 and 1.0 subsample a folder.
+- Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn’t leak duplicates between sources.
