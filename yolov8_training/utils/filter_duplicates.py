@@ -27,9 +27,11 @@ def save_combined_image(image1_path, image2_path, output_path):
     image1 = Image.open(image1_path).convert('RGB')
     image2 = Image.open(image2_path).convert('RGB')
 
-    # Ensure both images are the same size
-    image1 = ImageOps.fit(image1, (max(image1.size[0], image2.size[0]), max(image1.size[1], image2.size[1])))
-    image2 = ImageOps.fit(image2, (max(image1.size[0], image2.size[0]), max(image1.size[1], image2.size[1])))
+    # Ensure both images are resized to a common target size
+    target_w = max(image1.size[0], image2.size[0])
+    target_h = max(image1.size[1], image2.size[1])
+    image1 = ImageOps.fit(image1, (target_w, target_h))
+    image2 = ImageOps.fit(image2, (target_w, target_h))
 
     # Combine images side by side
     combined_image = Image.new('RGB', (image1.width + image2.width, image1.height))
