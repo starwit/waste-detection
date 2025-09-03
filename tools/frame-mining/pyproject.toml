@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "mine-frames-from-video"
+name = "frame-mining"
 version = "0.1.0"
-description = "Interactive video review and hard example capture with live YOLO"
+description = "Comprehensive frame mining tools for waste detection videos - automated and interactive approaches"
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
@@ -10,11 +10,11 @@ python = "^3.11"
 ultralytics = "^8.0.97"
 opencv-python = "^4.10.0.84"
 numpy = "^2.2.0"
+tqdm = "^4.67.1"
+torch = "^2.0.0"
 pillow = "^11.0.0"
 imagehash = "^4.3.1"
-tqdm = "^4.67.1"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
