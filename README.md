@@ -23,6 +23,7 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 6. [Raw Data Structure](#raw-data-structure)
 7. [Fine-tuning](#fine-tuning)
 8. [Folder Subsets](#folder-subsets)
+9. [Testing](#testing)
 
 ---
 
@@ -198,6 +199,32 @@ data:
 ```
 
 To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
+
+---
+
+## Testing
+
+This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
+
+- Using unittest
+  - Run all tests:
+    ```bash
+    poetry run python -m unittest -v
+    ```
+
+- Using pytest (optional)
+  - Install dev dependencies once:
+    ```bash
+    poetry install --with dev
+    ```
+  - Run tests:
+    ```bash
+    poetry run pytest -q
+    ```
+
+Notes
+- The E2E test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
+- Tests run on CPU with a minimal YOLOv8n configuration and a single epoch to keep runtime low.
 
 ---
 

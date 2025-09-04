@@ -21,36 +21,59 @@ from yolov8_training.utils.evaluate import (
 
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
-def load_class_config():
-    """Load class configuration from params.yaml"""
+
+def _load_params_yaml():
+    """Load and return params from params.yaml as a dict, or {} on failure."""
     try:
         with open("params.yaml", "r") as f:
-            params = yaml.safe_load(f)
-        
-        custom_classes = params.get("data", {}).get("custom_classes", [])
-        use_coco_classes = params.get("data", {}).get("use_coco_classes", True)
-        
-        # Filter out None/empty values from custom_classes
-        if custom_classes:
-            custom_classes = [cls for cls in custom_classes if cls]
- 
-
-        return custom_classes, use_coco_classes
+            return yaml.safe_load(f) or {}
     except Exception as e:
         print(f"Warning: Could not load params.yaml: {e}")
-        return [], True
-
-def load_folder_subset_config():
-    """Load folder subset configuration from params.yaml"""
-    try:
-        with open("params.yaml", "r") as f:
-            params = yaml.safe_load(f)
-        
-        folder_subsets = params.get("prepare", {}).get("folder_subsets", {})
-        return folder_subsets
-    except Exception as e:
-        print(f"Warning: Could not load folder subset config from params.yaml: {e}")
         return {}
+
+def load_class_config(params: dict | None = None):
+    """Load class configuration from params.yaml"""
+    if params is None:
+        params = _load_params_yaml()
+
+    custom_classes = params.get("data", {}).get("custom_classes", [])
+    use_coco_classes = params.get("data", {}).get("use_coco_classes", True)
+
+    # Filter out None/empty values from custom_classes
+    if custom_classes:
+        custom_classes = [cls for cls in custom_classes if cls]
+
+    return custom_classes, use_coco_classes
+
+def load_folder_subset_config(params: dict | None = None):
+    """Load folder subset configuration from params.yaml"""
+    if params is None:
+        params = _load_params_yaml()
+    return params.get("prepare", {}).get("folder_subsets", {})
+
+
+def _resolve_save_dir(model, results, default: Path) -> Path:
+    """Return Ultralytics' actual save_dir if available, else default.
+
+    Keeps train_model concise while handling version differences
+    (trainer.save_dir vs. results.save_dir).
+    """
+    try:
+        trainer = getattr(model, "trainer", None)
+        candidate = getattr(trainer, "save_dir", None) if trainer is not None else None
+        if candidate:
+            return Path(candidate)
+    except Exception:
+        pass
+
+    try:
+        candidate = getattr(results, "save_dir", None)
+        if candidate:
+            return Path(candidate)
+    except Exception:
+        pass
+
+    return default
 
 def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
@@ -94,12 +117,14 @@ def train_model(
 
     # Define project name and ensure unique run name
     project = "runs"
-    base_name = experiment_name
-    name = base_name
-    run_number = 1
-    while (Path(project) / name).exists():
-        name = f"{base_name}_{run_number}"
-        run_number += 1
+    name = None
+    if experiment_name:
+        base_name = experiment_name
+        name = base_name
+        run_number = 1
+        while (Path(project) / name).exists():
+            name = f"{base_name}_{run_number}"
+            run_number += 1
 
     # Prepare training arguments
     train_args = {
@@ -111,8 +136,9 @@ def train_model(
         "workers": 4,
         "amp": True,
         "project": project,
-        "name": name,
     }
+    if name:
+        train_args["name"] = name
     
     # Add fine-tuning specific parameters
     if finetune_mode:
@@ -127,7 +153,11 @@ def train_model(
 
     results = model.train(**train_args)
 
-    return model, results, Path(project) / name, experiment_name
+    default_dir = Path(project) / (name if name else "train")
+    output_dir = _resolve_save_dir(model, results, default_dir)
+
+    # Keep return signature compatible with tests: (model, results, output_dir)
+    return model, results, output_dir
 
 
 def process_data(
@@ -171,6 +201,8 @@ def delete_unused_folders():
     """
     print("Checking for unused folders in 'runs/' directory...")
     runs_dir = Path("runs")
+    if not runs_dir.exists():
+        return
     for folder in runs_dir.iterdir():
         if folder.is_dir() and not any(folder.iterdir()):
             print(f"Deleting empty folder: {folder}")
@@ -184,11 +216,12 @@ def run_prepare_stage(args):
     recreate_dataset = args.recreate_dataset
     augment_multiplier=args.augment_multiplier
     
+    # Load params once to avoid multiple file reads
+    _params = _load_params_yaml()
     # Load class configuration
-    custom_classes, use_coco_classes = load_class_config()
-    
+    custom_classes, use_coco_classes = load_class_config(_params)
     # Load folder subset configuration
-    folder_subsets = load_folder_subset_config()
+    folder_subsets = load_folder_subset_config(_params)
     
     # Override with command-line arguments if provided
     if args.folder_subset:
@@ -324,21 +357,17 @@ def run_train_eval_stage(args):
 
     # Load fine-tuning parameters from params.yaml
     try:
-        with open("params.yaml", "r") as f:
-            params = yaml.safe_load(f)
-        
+        params = _load_params_yaml()
         train_params = params.get("train", {})
         finetune_mode = train_params.get("finetune_mode", False)
         pretrained_model_path = train_params.get("pretrained_model_path", None)
         finetune_lr = train_params.get("finetune_lr", None)
         finetune_epochs = train_params.get("finetune_epochs", None)
         freeze_backbone = train_params.get("freeze_backbone", False)
-        
         # Use fine-tuning epochs if in fine-tuning mode and specified
         if finetune_mode and finetune_epochs is not None:
             train_epochs = finetune_epochs
             print(f"Fine-tuning mode: Using {finetune_epochs} epochs")
-            
     except Exception as e:
         print(f"Warning: Could not load fine-tuning params from params.yaml: {e}")
         finetune_mode = False
@@ -353,7 +382,7 @@ def run_train_eval_stage(args):
     test_path = dataset_path / "test"
 
     # Train the model
-    model, results, train_output_dir, final_experiment_name = train_model(
+    model, results, train_output_dir = train_model(
         training_path,
         model_size,
         image_size,
@@ -364,6 +393,11 @@ def run_train_eval_stage(args):
         pretrained_model_path=pretrained_model_path,
         finetune_lr=finetune_lr,
         freeze_backbone=freeze_backbone,
+    )
+
+    # Determine the final experiment display name (append suffix in finetune mode)
+    final_experiment_name = (
+        f"{experiment_name}-finetune" if experiment_name and finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists() else experiment_name
     )
 
     # Determine baseline model for comparison

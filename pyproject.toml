@@ -30,6 +30,10 @@ dvc-ssh = "^4.2.1"
 ruamel-yaml = "^0.18.14"
 
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
