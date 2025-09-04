@@ -8,7 +8,13 @@ import numpy as np
 import re
 import yaml
 import csv
-from typing import List, Tuple, Dict, Set
+from typing import List, Dict, Set
+
+from yolov8_training.utils.types import (
+    ImageLabelPair,
+    ProcessedFolder,
+    SplitData,
+)
 
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
@@ -222,9 +228,9 @@ def remap_yaml_dataset_labels(dataset_dir: Path, target_class_mapping: dict) -> 
 
 def _apply_subset_sampling(
     folder_name: str,
-    pairs: List[Tuple[Path, Path, str]],
+    pairs: List[ImageLabelPair],
     subset_ratio: float
-) -> List[Tuple[Path, Path, str]]:
+) -> List[ImageLabelPair]:
     if subset_ratio > 1:
         original_count = len(pairs)
         oversample_factor = int(subset_ratio)
@@ -275,8 +281,8 @@ def _process_cvat_folder(
     target_class_mapping: Dict[int, str],
     folder_subsets: Dict[str, float],
     temp_folders: List[Path],
-) -> Tuple[List[Tuple[Path, Path, str]], List[Path], int, int]:
-    folder_pairs: List[Tuple[Path, Path, str]] = []
+) -> ProcessedFolder:
+    folder_pairs: List[ImageLabelPair] = []
     empty_label_count = 0
     skip_count = 0
 
@@ -300,7 +306,7 @@ def _process_cvat_folder(
                     pass
                 empty_label_count += 1
             convert_polygons_to_bboxes_inplace(label_path)
-            folder_pairs.append((image_path, label_path, scene_name))
+            folder_pairs.append(ImageLabelPair(image_path, label_path, scene_name))
         else:
             skip_count += 1
 
@@ -313,12 +319,12 @@ def _process_cvat_folder(
             temp_folders.append(temp_folder)
             # Use robust path remapping
             folder_pairs = [
-                (
-                    temp_folder.joinpath(img.relative_to(folder_to_process)),
-                    temp_folder.joinpath(lbl.relative_to(folder_to_process)),
-                    scene_name,
+                ImageLabelPair(
+                    temp_folder.joinpath(p.image.relative_to(folder_to_process)),
+                    temp_folder.joinpath(p.label.relative_to(folder_to_process)),
+                    p.scene,
                 )
-                for img, lbl, scene_name in folder_pairs
+                for p in folder_pairs
             ]
         except Exception as e:
             print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
@@ -332,9 +338,11 @@ def _process_cvat_folder(
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
-        folder_pairs = _apply_subset_sampling(folder_name, folder_pairs, folder_subsets[folder_name])
+        folder_pairs = _apply_subset_sampling(
+            folder_name, folder_pairs, folder_subsets[folder_name]
+        )
 
-    return folder_pairs, temp_folders, empty_label_count, skip_count
+    return ProcessedFolder(folder_pairs, temp_folders, empty_label_count, skip_count)
 
 
 def _process_manual_folder(
@@ -344,15 +352,15 @@ def _process_manual_folder(
     target_class_mapping: Dict[int, str],
     folder_subsets: Dict[str, float],
     temp_folders: List[Path],
-) -> Tuple[List[Tuple[Path, Path, str]], List[Path], int]:
-    temp_pairs: List[Tuple[Path, Path, str]] = []
+) -> ProcessedFolder:
+    temp_pairs: List[ImageLabelPair] = []
     empty_label_count = 0
 
     images_folder = folder_to_process / "images"
     labels_folder = folder_to_process / "labels"
     if not images_folder.exists():
         print(f"Skipping {folder_to_process.name}: Missing 'images' folder.")
-        return [], temp_folders, empty_label_count
+        return ProcessedFolder([], temp_folders, empty_label_count)
 
     if not labels_folder.exists():
         labels_folder.mkdir(parents=True, exist_ok=True)
@@ -365,7 +373,7 @@ def _process_manual_folder(
                     pass
                 empty_label_count += 1
             convert_polygons_to_bboxes_inplace(label_file)
-            temp_pairs.append((image_file, label_file, scene_name))
+            temp_pairs.append(ImageLabelPair(image_file, label_file, scene_name))
 
     data_yaml_path = folder_to_process / "data.yaml"
     if data_yaml_path.exists():
@@ -390,12 +398,12 @@ def _process_manual_folder(
             remap_yaml_dataset_labels(temp_folder, target_class_mapping)
             temp_folders.append(temp_folder)
             temp_pairs = [
-                (
-                    Path(str(img).replace(str(folder_to_process), str(temp_folder))),
-                    Path(str(lbl).replace(str(folder_to_process), str(temp_folder))),
-                    scene_name,
+                ImageLabelPair(
+                    temp_folder.joinpath(p.image.relative_to(folder_to_process)),
+                    temp_folder.joinpath(p.label.relative_to(folder_to_process)),
+                    p.scene,
                 )
-                for img, lbl, scene_name in temp_pairs
+                for p in temp_pairs
             ]
         except Exception as e:
             print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
@@ -409,25 +417,29 @@ def _process_manual_folder(
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
-        temp_pairs = _apply_subset_sampling(folder_name, temp_pairs, folder_subsets[folder_name])
+        temp_pairs = _apply_subset_sampling(
+            folder_name, temp_pairs, folder_subsets[folder_name]
+        )
 
-    return temp_pairs, temp_folders, empty_label_count
+    return ProcessedFolder(temp_pairs, temp_folders, empty_label_count)
 
 
 def _dedupe_pairs(
-    image_label_pairs: List[Tuple[Path, Path, str]],
+    image_label_pairs: List[ImageLabelPair],
     folder_subsets: Dict[str, float]
-) -> List[Tuple[Path, Path, str]]:
+) -> List[ImageLabelPair]:
     detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
-    folder_groups: Dict[str, List[Tuple[Path, Path, str]]] = {}
+    folder_groups: Dict[str, List[ImageLabelPair]] = {}
     for img_path, lbl_path, scene_name in image_label_pairs:
-        folder_groups.setdefault(scene_name, []).append((img_path, lbl_path, scene_name))
+        folder_groups.setdefault(scene_name, []).append(
+            ImageLabelPair(img_path, lbl_path, scene_name)
+        )
 
     oversampled_folders: Set[str] = {
         folder_name for folder_name in folder_subsets.keys() if folder_subsets[folder_name] > 1
     }
 
-    processed_pairs: List[Tuple[Path, Path, str]] = []
+    processed_pairs: List[ImageLabelPair] = []
     unique_images_per_folder: Dict[str, Set[Path]] = {}
 
     for folder_name, folder_pairs in folder_groups.items():
@@ -442,7 +454,11 @@ def _dedupe_pairs(
                 print(f"Found {len(clusters)} duplicate clusters in folder '{folder_name}':")
                 detector.print_duplicate_clusters(clusters)
             unique_folder_images = set(detector.get_unique_images(folder_images))
-            unique_folder_pairs = [(img, lbl, scene) for img, lbl, scene in folder_pairs if img in unique_folder_images]
+            unique_folder_pairs = [
+                ImageLabelPair(img, lbl, scene)
+                for img, lbl, scene in folder_pairs
+                if img in unique_folder_images
+            ]
             print(f"Folder '{folder_name}': {len(unique_folder_pairs)}/{len(folder_pairs)} unique images after duplicate removal")
             processed_pairs.extend(unique_folder_pairs)
             unique_images_per_folder[folder_name] = unique_folder_images
@@ -458,7 +474,7 @@ def _dedupe_pairs(
             detector.print_duplicate_clusters(cross_clusters)
             cross_unique_images = set(detector.get_unique_images(all_unique_images))
             processed_pairs = [
-                (img_path, lbl_path, scene_name)
+                ImageLabelPair(img_path, lbl_path, scene_name)
                 for img_path, lbl_path, scene_name in processed_pairs
                 if img_path in cross_unique_images
             ]
@@ -580,7 +596,7 @@ def move_images_to_output(
 
 def split_data(
     images: List[Path], labels: List[Path], val_split: float
-) -> Tuple[List[Path], List[Path], List[Path], List[Path]]:
+) -> SplitData:
     """
     Split the data into training and validation sets using random sampling.
 
@@ -590,13 +606,13 @@ def split_data(
         val_split: Fraction of data to use for validation (0.0 to 1.0)
 
     Returns:
-        Tuple of (train_images, train_labels, val_images, val_labels)
+        SplitData: (train_images, train_labels, val_images, val_labels)
     """
     if val_split == 0:
-        return images, labels, [], []
+        return SplitData(images, labels, [], [])
 
     if val_split == 1:
-        return [], [], images, labels
+        return SplitData([], [], images, labels)
 
     # Calculate validation set size
     val_size = int(len(images) * val_split)
@@ -610,14 +626,14 @@ def split_data(
     val_images = [img for i, img in enumerate(images) if i in val_indices]
     val_labels = [lbl for i, lbl in enumerate(labels) if i in val_indices]
 
-    return train_images, train_labels, val_images, val_labels
+    return SplitData(train_images, train_labels, val_images, val_labels)
 
 
-def augment(image_label_pairs, augment_multiplier=1):
+def augment(image_label_pairs: List[ImageLabelPair], augment_multiplier: int = 1):
 
     print(f"Applying augmentation with multiplier {augment_multiplier}...")
     augmenter = YOLOAugmenter(multiplier=augment_multiplier)
-    augmented_pairs = []
+    augmented_pairs: List[ImageLabelPair] = []
 
     temp_folders = []
 
@@ -674,7 +690,7 @@ def augment(image_label_pairs, augment_multiplier=1):
                 for label in aug_labels:
                     f.write(" ".join(map(str, label)) + "\n")
 
-            augmented_pairs.append((aug_img_path, aug_label_path, scene_name))
+            augmented_pairs.append(ImageLabelPair(aug_img_path, aug_label_path, scene_name))
 
     # Add augmented pairs to original pairs
     print(f"Added {len(augmented_pairs)} augmented images")
@@ -755,7 +771,7 @@ def process_single_images(
         # Check if this is a CVAT export folder with train.txt
         train_txt = folder_to_process / "train.txt"
         if train_txt.exists():
-            folder_pairs, temp_folders, ec, sc = _process_cvat_folder(
+            cvat_result = _process_cvat_folder(
                 some_folder,
                 folder_to_process,
                 scene_name,
@@ -763,11 +779,11 @@ def process_single_images(
                 folder_subsets,
                 temp_folders,
             )
-            empty_label_count += ec
-            skip_count += sc
-            image_label_pairs.extend(folder_pairs)
+            empty_label_count += cvat_result.empty_label_count
+            skip_count += cvat_result.skip_count
+            image_label_pairs.extend(cvat_result.pairs)
         else:
-            temp_pairs, temp_folders, ec = _process_manual_folder(
+            manual_result = _process_manual_folder(
                 some_folder,
                 folder_to_process,
                 scene_name,
@@ -775,8 +791,8 @@ def process_single_images(
                 folder_subsets,
                 temp_folders,
             )
-            empty_label_count += ec
-            image_label_pairs.extend(temp_pairs)
+            empty_label_count += manual_result.empty_label_count
+            image_label_pairs.extend(manual_result.pairs)
 
     print(f"Included {empty_label_count} images with empty labels (no objects).")
     print(f"Skipped {skip_count} images that couldn't be found.")
