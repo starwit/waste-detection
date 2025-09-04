@@ -306,10 +306,11 @@ def _process_cvat_folder(
 
     if (folder_to_process / "data.yaml").exists():
         temp_folder = some_folder.parent / f"{some_folder.name}_temp"
-        shutil.copytree(folder_to_process, temp_folder)
-        temp_folders.append(temp_folder)  # Append immediately after creation
         try:
+            shutil.copytree(folder_to_process, temp_folder)
             remap_yaml_dataset_labels(temp_folder, target_class_mapping)
+            # Only track temp_folder if remap succeeded
+            temp_folders.append(temp_folder)
             # Use robust path remapping
             folder_pairs = [
                 (
@@ -319,14 +320,15 @@ def _process_cvat_folder(
                 )
                 for img, lbl, scene_name in folder_pairs
             ]
-        except Exception:
-            # Remove orphaned temp_folder and re-raise
-            try:
-                shutil.rmtree(temp_folder)
-            except Exception as cleanup_exc:
-                print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
-            temp_folders.remove(temp_folder)
-            raise
+        except Exception as e:
+            print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
+            print("Continuing without class mapping for this folder.")
+            # Clean up orphaned/partial temp_folder
+            if Path(temp_folder).exists():
+                try:
+                    shutil.rmtree(temp_folder)
+                except Exception as cleanup_exc:
+                    print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
@@ -368,6 +370,7 @@ def _process_manual_folder(
     data_yaml_path = folder_to_process / "data.yaml"
     if data_yaml_path.exists():
         print(f"Found data.yaml in manual structure: {folder_to_process.name}")
+        temp_folder = some_folder.parent / f"{some_folder.name}_temp"
         try:
             with open(data_yaml_path, "r") as f:
                 yaml_config = yaml.safe_load(f)
@@ -383,7 +386,6 @@ def _process_manual_folder(
                     source_classes = list(yaml_classes.values())
                 print(f"Source classes: {source_classes}")
                 print(f"Target classes: {list(target_class_mapping.values())}")
-            temp_folder = some_folder.parent / f"{some_folder.name}_temp"
             shutil.copytree(folder_to_process, temp_folder)
             remap_yaml_dataset_labels(temp_folder, target_class_mapping)
             temp_folders.append(temp_folder)
@@ -398,6 +400,12 @@ def _process_manual_folder(
         except Exception as e:
             print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
             print("Continuing without class mapping for this folder.")
+            # Clean up temp folder if it was created
+            if Path(temp_folder).exists():
+                try:
+                    shutil.rmtree(temp_folder)
+                except Exception as cleanup_exc:
+                    print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
