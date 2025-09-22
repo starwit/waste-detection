@@ -89,9 +89,26 @@ def export_baseline(args):
             print(f"Warning: metadata source not found at {metadata_source}; creating minimal file")
 
     # Enrich metadata with export info
-    metadata_to_write.setdefault("source_run", str(run_dir) if run_dir else str(weights_source.parent))
-    metadata_to_write["source_weights"] = str(weights_source)
-    metadata_to_write["exported_at"] = datetime.now(timezone.utc).isoformat()
+    # Convert absolute paths to relative paths starting with "runs/"
+    workspace_root = Path.cwd()
+    
+    if run_dir:
+        try:
+            run_dir_relative = run_dir.relative_to(workspace_root)
+            metadata_to_write.setdefault("source_run", str(run_dir_relative))
+        except ValueError:
+            # Fallback to absolute path if relative conversion fails
+            metadata_to_write.setdefault("source_run", str(run_dir))
+    else:
+        metadata_to_write.setdefault("source_run", str(weights_source.parent))
+    
+    try:
+        weights_relative = weights_source.relative_to(workspace_root)
+        metadata_to_write["source_weights"] = str(weights_relative)
+    except ValueError:
+        # Fallback to absolute path if relative conversion fails
+        metadata_to_write["source_weights"] = str(weights_source)
+    
     if args.tag:
         metadata_to_write["tag"] = args.tag
 
