@@ -9,14 +9,24 @@ This suite checks two things:
 
 import shutil
 from pathlib import Path
+
 import cv2
 import numpy as np
+import pytest
+from typing import NamedTuple
 
 from yolov8_training.utils.data_utils import process_single_images, create_dataset_yaml
 from yolov8_training.train_pipeline import train_model
 
 
-def _prepare_source(tmp_path: Path):
+class SourceDataset(NamedTuple):
+    train_raw: Path
+    images_dir: Path
+    labels_dir: Path
+
+
+@pytest.fixture
+def source_dataset(tmp_path: Path) -> SourceDataset:
     raw_data = tmp_path / "raw_data"
     train_raw = raw_data / "train"
     train_raw.mkdir(parents=True, exist_ok=True)
@@ -57,16 +67,16 @@ def _prepare_source(tmp_path: Path):
                 f.write("")
         # For image2: no label file is created
 
-    return train_raw, images_dir, labels_dir
+    return SourceDataset(train_raw=train_raw, images_dir=images_dir, labels_dir=labels_dir)
 
 
-def test_process_single_images(tmp_path: Path):
+def test_process_single_images(tmp_path: Path, source_dataset: SourceDataset):
     """Process mixed labels (present/empty/missing) and verify outputs.
 
     Confirms empty/missing labels are created as empty files, counts match,
     and every image in train has a corresponding label file.
     """
-    train_raw, images_dir, labels_dir = _prepare_source(tmp_path)
+    train_raw, images_dir, labels_dir = source_dataset
 
     # Create output directories
     processed_output = tmp_path / "processed_dataset"
@@ -107,12 +117,12 @@ def test_process_single_images(tmp_path: Path):
             assert content != "", f"Label for {image_file.name} should not be empty"
 
 
-def test_train_model_minimal(tmp_path: Path):
+def test_train_model_minimal(tmp_path: Path, source_dataset: SourceDataset):
     """Minimal training run including a background-only (empty-label) sample.
 
     Smoke-checks that `train_model` runs without error and produces outputs.
     """
-    _, images_dir, labels_dir = _prepare_source(tmp_path)
+    _, images_dir, labels_dir = source_dataset
 
     # Create the dataset directory that will be used for training
     dataset_dir = tmp_path / "datasets" / "test_dataset"
