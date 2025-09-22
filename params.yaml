@@ -33,3 +33,5 @@ train:
   finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
   finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
   freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
+evaluation:
+  baseline_weights_path: models/current_best/best.pt  # Optional .pt weights to use as baseline for comparisons

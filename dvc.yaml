@@ -33,6 +33,7 @@ stages:
       - data
       - prepare.val_split
       - train
+      - evaluation.baseline_weights_path
     deps:
       - yolov8_training/train_pipeline.py
       - yolov8_training/utils/evaluate.py

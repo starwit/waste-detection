@@ -359,11 +359,13 @@ def run_train_eval_stage(args):
     try:
         params = _load_params_yaml()
         train_params = params.get("train", {})
+        evaluation_params = params.get("evaluation", {})
         finetune_mode = train_params.get("finetune_mode", False)
         pretrained_model_path = train_params.get("pretrained_model_path", None)
         finetune_lr = train_params.get("finetune_lr", None)
         finetune_epochs = train_params.get("finetune_epochs", None)
         freeze_backbone = train_params.get("freeze_backbone", False)
+        baseline_weights_path = evaluation_params.get("baseline_weights_path")
         # Use fine-tuning epochs if in fine-tuning mode and specified
         if finetune_mode and finetune_epochs is not None:
             train_epochs = finetune_epochs
@@ -374,6 +376,7 @@ def run_train_eval_stage(args):
         pretrained_model_path = None
         finetune_lr = None
         freeze_backbone = False
+        baseline_weights_path = None
 
     # Define paths
     dataset_name = Path(args.dataset_name)
@@ -401,17 +404,57 @@ def run_train_eval_stage(args):
     )
 
     # Determine baseline model for comparison
-    if finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
-        baseline_model = YOLO(pretrained_model_path)
-        baseline_name = f"{experiment_name}-pretrained"
-    else:
-        baseline_model = YOLO(f"yolov8{model_size}.pt")
-        baseline_name = experiment_name
+    baseline_model = None
+    baseline_display_name = None
+
+    def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
+        if not path_candidate:
+            return None, None
+        candidate_path = Path(path_candidate).expanduser()
+        if not candidate_path.is_absolute():
+            candidate_path = Path.cwd() / candidate_path
+        if not candidate_path.exists():
+            print(f"Warning: Baseline weights not found at {candidate_path}")
+            return None, None
+        try:
+            model_instance = YOLO(str(candidate_path))
+            # Try to infer a friendly display name from sibling metadata
+            display_name = None
+            try:
+                meta_path = candidate_path.parent / "metadata.yaml"
+                if meta_path.exists():
+                    with open(meta_path, "r") as mf:
+                        meta = yaml.safe_load(mf) or {}
+                    display_name = (
+                        meta.get("experiment_name")
+                        or meta.get("baseline_display_name")
+                        or meta.get("run_name")
+                    )
+            except Exception as _:
+                display_name = None
+
+            return model_instance, (display_name or candidate_path.stem)
+        except Exception as load_error:
+            print(f"Warning: Could not load baseline model from {candidate_path}: {load_error}")
+            return None, None
+
+    # 1) Highest priority: explicitly configured baseline weights
+    baseline_model, baseline_display_name = _load_baseline_from_path(baseline_weights_path)
+
+    # 2) Next, fall back to the pre-trained weights used for fine-tuning (if available)
+    if baseline_model is None and finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
+        baseline_model, baseline_display_name = _load_baseline_from_path(pretrained_model_path)
+
+    # 3) Final fallback: COCO checkpoint matching the requested model size
+    if baseline_model is None:
+        baseline_checkpoint = f"yolov8{model_size}.pt"
+        baseline_model = YOLO(baseline_checkpoint)
+        baseline_display_name = f"yolov8{model_size}-coco"
 
     # Evaluate and log results for the baseline model
     evaluate_and_log_model_results(
         model=baseline_model,
-        model_name=baseline_name,
+        model_name=baseline_display_name or "baseline",
         test_path=test_path,
         image_size=image_size,
         output_dir=train_output_dir,
@@ -432,6 +475,7 @@ def run_train_eval_stage(args):
         val_split=val_split,
         train_epochs=train_epochs,
         baseline_model=baseline_model,  # Pass the correct baseline model
+        baseline_display_name=baseline_display_name,
     )
 
     # Organize output files
