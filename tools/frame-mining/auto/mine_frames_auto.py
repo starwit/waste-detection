@@ -1,5 +1,5 @@
 """
-Lean Intelligent Keyframe Mining (single file)
+Lean Intelligent Keyframe Mining
 
 Features
 - FrameStore: one-pass per video to cache resized-frame detections (low conf), sharpness, brightness, pHash,
@@ -61,9 +61,9 @@ class Config:
     MIN_SHARP_LABEL: float = 10.0
 
     # Dedupe / thinning
-    TEMPORAL_THIN_FR: int = 2
-    PHASH_HAMMING_MAX: int = 6
-    ALLOW_PER_TRACK_PHASH_BYPASS: bool = True
+    TEMPORAL_THIN_FR: int = 10
+    PHASH_HAMMING_MAX: int = 4
+    ALLOW_PER_TRACK_PHASH_BYPASS: bool = False
 
     # Inference / store
     INFER_IMG_LONG_EDGE: int = 960
