@@ -1,12 +1,19 @@
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple, Set, NamedTuple
 
 import cv2
 import imagehash
 from PIL import Image
 from skimage.metrics import structural_similarity as ssim
+
+
+class Match(NamedTuple):
+    """Similarity match for one image against a target image."""
+    target: Path
+    ssim_score: float
+    hamming: int
 
 
 class DisjointSet:
@@ -154,7 +161,7 @@ class DuplicateDetector:
 
     def compare_folders(
         self, folder1: Path, folder2: Path
-    ) -> Dict[Path, List[Tuple[Path, float, int]]]:
+    ) -> Dict[Path, List[Match]]:
         """Compare images between two folders and report similar pairs."""
         def collect_images(folder: Path) -> List[Path]:
             return (
@@ -173,18 +180,20 @@ class DuplicateDetector:
         folder1_hashes = [(p, int(h, 16)) for p, h in folder1_hashes if h]
         folder2_hashes = [(p, int(h, 16)) for p, h in folder2_hashes if h]
 
-        matches = defaultdict(list)
+        matches: Dict[Path, List[Match]] = defaultdict(list)
         for path1, hash1 in folder1_hashes:
             for path2, hash2 in folder2_hashes:
                 hamming = self.hamming_distance(hash1, hash2)
                 if hamming <= self.phash_threshold:
                     ssim_score = self.compute_ssim(path1, path2)
                     if ssim_score >= self.ssim_threshold:
-                        matches[path1].append((path2, ssim_score, hamming))
+                        matches[path1].append(
+                            Match(path2, ssim_score, hamming)
+                        )
         return matches
 
     def print_folder_comparison_results(
-        self, matches: Dict[Path, List[Tuple[Path, float, int]]]
+        self, matches: Dict[Path, List[Match]]
     ) -> None:
         if not matches:
             print("\nNo similar images found between the folders.")
@@ -194,9 +203,9 @@ class DuplicateDetector:
             print(f"\nImage {i} from source folder:")
             print(f"  Source: {src}")
             print("  Similar images in target folder:")
-            for tgt, ssim_score, hamming_dist in sims:
-                print(f"    - {tgt}")
-                print(f"      SSIM: {ssim_score:.3f}, Hamming distance: {hamming_dist}")
+            for m in sims:
+                print(f"    - {m.target}")
+                print(f"      SSIM: {m.ssim_score:.3f}, Hamming distance: {m.hamming}")
 
     def print_duplicate_clusters(self, clusters: Dict[Path, List[Path]]) -> None:
         print(f"\nFound {len(clusters)} duplicate clusters:")

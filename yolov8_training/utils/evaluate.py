@@ -21,6 +21,8 @@ def generate_side_by_side_comparisons(
     side_by_side_dir.mkdir(exist_ok=True)
 
     for img_path in test_img_dir.glob("*"):
+        if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
+            continue
         original_results = original_model.predict(
             str(img_path), conf=conf_threshold, save=False, verbose=False
         )
@@ -311,20 +313,99 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     return metrics_dict
 
 
+def _load_dataset_config_for_scenes(data: str) -> dict:
+    try:
+        with open(data, "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Error: Dataset YAML not found at {data}")
+        return {}
+    except Exception as e:
+        print(f"Error reading dataset YAML {data}: {e}")
+        return {}
+
+
+def _collect_scene_images(val_images_dir: Path, val_labels_dir: Path) -> dict:
+    scene_images = {}
+    for img_path in val_images_dir.glob("*"):
+        if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
+            continue
+        if "__scene_" in img_path.name:
+            parts = img_path.stem.split("__scene_")
+            if len(parts) > 1:
+                scene_name = parts[1]
+                scene_images.setdefault(scene_name, []).append(
+                    (img_path, val_labels_dir / img_path.with_suffix(".txt").name)
+                )
+    return scene_images
+
+
+def _copy_scene_to_temp(scene_name: str, images_labels: list) -> tuple[Path | None, int]:
+    temp_path = Path(tempfile.mkdtemp())
+    temp_images_dir = temp_path / "images"
+    temp_labels_dir = temp_path / "labels"
+    os.makedirs(temp_images_dir, exist_ok=True)
+    os.makedirs(temp_labels_dir, exist_ok=True)
+
+    copied_files = 0
+    for img_path, label_path in images_labels:
+        if img_path.exists() and label_path.exists():
+            new_img_name = img_path.name.replace(f"__scene_{scene_name}", "")
+            new_label_name = label_path.name.replace(f"__scene_{scene_name}", "")
+            try:
+                shutil.copy(img_path, temp_images_dir / new_img_name)
+                shutil.copy(label_path, temp_labels_dir / new_label_name)
+                copied_files += 1
+            except Exception as copy_e:
+                print(f"Error copying {img_path} or {label_path} to {temp_path}: {copy_e}")
+        else:
+            print(
+                f"Warning: Source file missing during copy for scene '{scene_name}': {img_path} or {label_path}"
+            )
+    return (temp_path if copied_files > 0 else None), copied_files
+
+
+def _write_scene_yaml(temp_path: Path, dataset_config: dict, scene_name: str) -> Path | None:
+    temp_yaml_path = temp_path / f"scene_{scene_name}.yaml"
+    scene_config = {
+        "path": str(temp_path),
+        "train": "images",
+        "val": "images",
+        "nc": len(dataset_config.get("names", [])),
+        "names": dataset_config.get("names", {}),
+    }
+    try:
+        with open(temp_yaml_path, "w") as f:
+            yaml.dump(scene_config, f)
+        return temp_yaml_path
+    except Exception as yaml_e:
+        print(f"Error writing temporary YAML {temp_yaml_path}: {yaml_e}")
+        return None
+
+
+def _validate_scene(model, temp_yaml_path: Path, class_ids: list | None, kwargs: dict) -> float:
+    eval_kwargs = {k: v for k, v in kwargs.items() if k in ["imgsz", "batch", "conf", "iou"]}
+    eval_kwargs["workers"] = 0
+    eval_kwargs["batch"] = 1
+    scene_results = model.val(
+        data=str(temp_yaml_path),
+        classes=class_ids if class_ids else None,
+        verbose=False,
+        save=False,
+        plots=False,
+        **eval_kwargs,
+    )
+    return float(getattr(scene_results, "fitness", 0.0))
+
+
 def calculate_scene_metrics(model, data, **kwargs):
     """
     Calculate fitness metrics for each scene in the test dataset.
     Scenes are identified by the __scene_ suffix in image filenames.
     """
     # Load the dataset yaml to get the path to test images
-    try:
-        with open(data, "r") as f:
-            dataset_config = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"Error: Dataset YAML not found at {data}")
-        return {}
-    except Exception as e:
-        print(f"Error reading dataset YAML {data}: {e}")
+    dataset_config = _load_dataset_config_for_scenes(data)
+    if not dataset_config:
         return {}
 
     if "path" not in dataset_config or "val" not in dataset_config:
@@ -339,105 +420,32 @@ def calculate_scene_metrics(model, data, **kwargs):
     class_names, class_ids = get_dataset_classes(data)
 
     # Group images by scene
-    scene_images = {}
-    for img_path in val_images_dir.glob("*"):
-        if "__scene_" in img_path.name:
-            parts = img_path.stem.split("__scene_")
-            if len(parts) > 1:
-                scene_name = parts[1]
-                if scene_name not in scene_images:
-                    scene_images[scene_name] = []
-                scene_images[scene_name].append(
-                    (img_path, val_labels_dir / img_path.with_suffix(".txt").name)
-                )
+    scene_images = _collect_scene_images(val_images_dir, val_labels_dir)
 
     # Results dictionary to store scene metrics
     scene_metrics = {}
 
     # Process each scene separately
     for scene_name, images_labels in scene_images.items():
-        temp_dir = None
+        temp_path = None
         try:
-            temp_path = Path(tempfile.mkdtemp())
-
-            temp_images_dir = temp_path / "images"
-            temp_labels_dir = temp_path / "labels"
-
-            os.makedirs(temp_images_dir, exist_ok=True)
-            os.makedirs(temp_labels_dir, exist_ok=True)
-
-            copied_files = 0
-            # Copy scene images and labels to temp directory
-            for img_path, label_path in images_labels:
-                if img_path.exists() and label_path.exists():
-                    # Remove scene suffix to make filenames standard again
-                    new_img_name = img_path.name.replace(f"__scene_{scene_name}", "")
-                    new_label_name = label_path.name.replace(
-                        f"__scene_{scene_name}", ""
-                    )
-
-                    try:
-                        shutil.copy(img_path, temp_images_dir / new_img_name)
-                        shutil.copy(label_path, temp_labels_dir / new_label_name)
-                        copied_files += 1
-                    except Exception as copy_e:
-                        print(
-                            f"Error copying {img_path} or {label_path} to {temp_dir}: {copy_e}"
-                        )
-                else:
-                    # Log if source files are missing during the copy operation itself
-                    print(
-                        f"Warning: Source file missing during copy for scene '{scene_name}': {img_path} or {label_path}"
-                    )
-
-            if copied_files == 0:
+            temp_path, copied_files = _copy_scene_to_temp(scene_name, images_labels)
+            if not temp_path or copied_files == 0:
                 print(
                     f"Warning: No files were copied for scene '{scene_name}'. Skipping validation."
                 )
                 continue
 
             # Create temp yaml for this scene
-            temp_yaml_path = temp_path / f"scene_{scene_name}.yaml"
-            scene_config = {
-                "path": str(temp_path),
-                "train": "images",
-                "val": "images",
-                "nc": len(dataset_config["names"]),
-                "names": dataset_config["names"],
-            }
-
-            try:
-                with open(temp_yaml_path, "w") as f:
-                    yaml.dump(scene_config, f)
-            except Exception as yaml_e:
-                print(f"Error writing temporary YAML {temp_yaml_path}: {yaml_e}")
+            temp_yaml_path = _write_scene_yaml(temp_path, dataset_config, scene_name)
+            if not temp_yaml_path:
                 continue
 
             # Run validation on this scene
             try:
-                # Pass necessary kwargs like imgsz, conf, iou
-                eval_kwargs = {
-                    k: v
-                    for k, v in kwargs.items()
-                    if k in ["imgsz", "batch", "conf", "iou"]
-                }
-
-                # Force synchronous processing to prevent file access race conditions
-                eval_kwargs["workers"] = 0
-                eval_kwargs["batch"] = 1
-
-                scene_results = model.val(
-                    data=str(temp_yaml_path),
-                    classes=class_ids if class_ids else None,
-                    verbose=False,
-                    save=False,
-                    plots=False,
-                    **eval_kwargs,
-                )
-
-                # Store fitness for this scene
-                scene_fitness = getattr(scene_results, "fitness", 0.0)
-                scene_metrics[f"scene_{scene_name}_fitness"] = float(scene_fitness)
+                # Run validation and store fitness
+                fitness = _validate_scene(model, temp_yaml_path, class_ids, kwargs)
+                scene_metrics[f"scene_{scene_name}_fitness"] = fitness
 
             except Exception as e:
                 # Print details if validation for a specific scene fails
@@ -449,7 +457,7 @@ def calculate_scene_metrics(model, data, **kwargs):
 
         finally:
             # Ensure cleanup happens regardless of success or failure after evaluation is finished
-            if temp_path.exists():
+            if temp_path and temp_path.exists():
                 shutil.rmtree(temp_path, ignore_errors=True)
 
     return scene_metrics
@@ -577,6 +585,54 @@ def create_formatted_table(csv_path):
         f.write(formatted_descriptions)
 
 
+def _collect_scene_columns(path_results2: dict | None) -> list:
+    scene_columns = []
+    if path_results2 is not None:
+        for key in path_results2:
+            if key.startswith("scene_") and key.endswith("_fitness"):
+                scene_columns.append(key)
+    return scene_columns
+
+
+def _format_values(rows: list) -> list:
+    formatted_data = []
+    for row in rows:
+        formatted_row = [row[0]]
+        formatted_values = []
+        for value in row[1:]:
+            if isinstance(value, (int, float)):
+                formatted_values.append(f"{value:.4f}")
+            else:
+                formatted_values.append(value)
+        formatted_row.extend(formatted_values)
+        formatted_data.append(formatted_row)
+    return formatted_data
+
+
+def _build_mean_table_rows(basic_columns, scene_columns, path_results1, path_results2, experiment_name, base_run, base_model_name):
+    if base_run and path_results1 is not None:
+        base_model_display_name = base_model_name if base_model_name else "YOLOv8m (base run)"
+        base_row = [base_model_display_name]
+        for col in basic_columns[1:]:
+            base_row.append(path_results1[col.lower()])
+        for col in scene_columns:
+            base_row.append(path_results1.get(col, 0.0))
+
+        retrained_row = [experiment_name]
+        for col in basic_columns[1:]:
+            retrained_row.append(path_results2[col.lower()])
+        for col in scene_columns:
+            retrained_row.append(path_results2.get(col, 0.0))
+        return [base_row, retrained_row]
+    else:
+        retrained_row = [experiment_name]
+        for col in basic_columns[1:]:
+            retrained_row.append(path_results2[col.lower()])
+        for col in scene_columns:
+            retrained_row.append(path_results2.get(col, 0.0))
+        return [retrained_row]
+
+
 def mean_table(path_results1, path_results2, experiment_name, base_run, base_model_name=None):
     # Collect all columns, including scene metrics
     basic_columns = [
@@ -592,63 +648,14 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
 ]
 
     # Add scene metrics columns
-    scene_columns = []
-    if path_results2 is not None:
-        for key in path_results2:
-            if key.startswith("scene_") and key.endswith("_fitness"):
-                scene_columns.append(key)
+    scene_columns = _collect_scene_columns(path_results2)
 
     columns = basic_columns + scene_columns
 
-    def format_values(data):
-        formatted_data = []
-        for row in data:
-            formatted_row = [row[0]]  # Model name
-            formatted_values = []
-            for value in row[1:]:
-                if isinstance(value, (int, float)):
-                    formatted_values.append(f"{value:.4f}")
-                else:
-                    formatted_values.append(value)
-            formatted_row.extend(formatted_values)
-            formatted_data.append(formatted_row)
-        return formatted_data
-
-    if base_run and path_results1 is not None:
-        # Create data for base model
-        base_model_display_name = base_model_name if base_model_name else "YOLOv8m (base run)"
-        base_row = [base_model_display_name]
-        for col in basic_columns[1:]:  # Skip MODEL column
-            base_row.append(path_results1[col.lower()])
-
-        # Add scene metrics for base model
-        for col in scene_columns:
-            base_row.append(path_results1.get(col, 0.0))
-
-        # Create data for retrained model
-        retrained_row = [experiment_name]
-        for col in basic_columns[1:]:  # Skip MODEL column
-            retrained_row.append(path_results2[col.lower()])
-
-        # Add scene metrics for retrained model
-        for col in scene_columns:
-            retrained_row.append(path_results2.get(col, 0.0))
-
-        data = [base_row, retrained_row]
-    else:
-        # Only retrained model data
-        retrained_row = [experiment_name]
-        for col in basic_columns[1:]:  # Skip MODEL column
-            retrained_row.append(path_results2[col.lower()])
-
-        # Add scene metrics for retrained model
-        for col in scene_columns:
-            retrained_row.append(path_results2.get(col, 0.0))
-
-        data = [retrained_row]
+    data = _build_mean_table_rows(basic_columns, scene_columns, path_results1, path_results2, experiment_name, base_run, base_model_name)
 
     # Format the data values
-    formatted_data = format_values(data)
+    formatted_data = _format_values(data)
 
     # Create results directory if it doesn't exist
     os.makedirs("./results_comparison", exist_ok=True)
