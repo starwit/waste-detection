@@ -9,6 +9,13 @@ from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
 
+class Match(NamedTuple):
+    """Similarity match for one image against a target image."""
+    target: Path
+    ssim_score: float
+    hamming: int
+
+
 class DisjointSet:
     """
     DisjointSet (Union-Find) data structure for efficiently grouping elements into disjoint sets.
@@ -152,15 +159,9 @@ class DuplicateDetector:
         # keep only duplicate groups
         return {root: imgs for root, imgs in clusters.items() if len(imgs) > 1}
 
-    class Match(NamedTuple):
-        """Similarity match for one image against a target image."""
-        target: Path
-        ssim_score: float
-        hamming: int
-
     def compare_folders(
         self, folder1: Path, folder2: Path
-    ) -> Dict[Path, List["DuplicateDetector.Match"]]:
+    ) -> Dict[Path, List[Match]]:
         """Compare images between two folders and report similar pairs."""
         def collect_images(folder: Path) -> List[Path]:
             return (
@@ -179,7 +180,7 @@ class DuplicateDetector:
         folder1_hashes = [(p, int(h, 16)) for p, h in folder1_hashes if h]
         folder2_hashes = [(p, int(h, 16)) for p, h in folder2_hashes if h]
 
-        matches: Dict[Path, List[DuplicateDetector.Match]] = defaultdict(list)
+        matches: Dict[Path, List[Match]] = defaultdict(list)
         for path1, hash1 in folder1_hashes:
             for path2, hash2 in folder2_hashes:
                 hamming = self.hamming_distance(hash1, hash2)
@@ -187,12 +188,12 @@ class DuplicateDetector:
                     ssim_score = self.compute_ssim(path1, path2)
                     if ssim_score >= self.ssim_threshold:
                         matches[path1].append(
-                            DuplicateDetector.Match(path2, ssim_score, hamming)
+                            Match(path2, ssim_score, hamming)
                         )
         return matches
 
     def print_folder_comparison_results(
-        self, matches: Dict[Path, List["DuplicateDetector.Match"]]
+        self, matches: Dict[Path, List[Match]]
     ) -> None:
         if not matches:
             print("\nNo similar images found between the folders.")
