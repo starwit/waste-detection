@@ -6,25 +6,25 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: ba4160f8fba6b8c275365148bacf86c1.dir
-      size: 3513045872
-      nfiles: 14239
+      md5: 62e835a82d01d09f46c6f668dc1a9f84.dir
+      size: 4425335149
+      nfiles: 15759
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 1e955ca9c96382ad32b3def8bd3dd165
-      size: 17767
+      md5: 2d59ea684e85e58eaae5f7395733a071
+      size: 21168
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 737b5ab887069ec8054007aad305f195
-      size: 36874
+      md5: c3a9635e74e8baa59cef623d8cf25f9f
+      size: 33142
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: a01d85b2dde81ae0e06f2268083fea69
-      size: 8136
+      md5: f62195cfe2b869f50bc9ef17cd3a7773
+      size: 8320
     params:
       params.yaml:
         data:
@@ -40,43 +40,49 @@ stages:
           augment_multiplier: 1
           folder_subsets:
             uavvaste: 0.5
-            taco: 0.3
+            taco: 0.2
             cw32-08-07-train: 2.0
+            cw33-auto-mined: 2.0
+            cw36-auto-mined: 2.0
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: a54355a4ef831aeee972166e3d52c972.dir
-      size: 1936376195
-      nfiles: 5120
+      md5: f9dd54bdda3a463f722da0cdcedd5b89.dir
+      size: 2994034638
+      nfiles: 5732
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: d048604be0b5e6d20f4824c675921c6f.dir
-      size: 1937187377
-      nfiles: 5123
-    - path: taco-uav-model.pt
+      md5: ac2e961a89cad46094f49e267f6fa90b.dir
+      size: 2994918100
+      nfiles: 5735
+    - path: models/current_best/best.pt
       hash: md5
-      md5: 34a611d68a32a111b0a012a7428aaddc
+      md5: c2ced17998066eb9765c5ba587d7d4c7
+      size: 52186507
+    - path: models/current_best/best.pt
+      hash: md5
+      md5: c2ced17998066eb9765c5ba587d7d4c7
       size: 52186507
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 1e955ca9c96382ad32b3def8bd3dd165
-      size: 17767
+      md5: 2d59ea684e85e58eaae5f7395733a071
+      size: 21168
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 737b5ab887069ec8054007aad305f195
-      size: 36874
+      md5: c3a9635e74e8baa59cef623d8cf25f9f
+      size: 33142
     - path: yolov8_training/utils/evaluate.py
       hash: md5
-      md5: d7de9a5b7fca7316044c300cbe219ff4
-      size: 27212
+      md5: 46be88fba6d64b3c33f1faa46632505b
+      size: 26976
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: a01d85b2dde81ae0e06f2268083fea69
-      size: 8136
+      md5: f62195cfe2b869f50bc9ef17cd3a7773
+      size: 8320
     params:
       params.yaml:
         data:
@@ -86,6 +92,7 @@ stages:
           - waste
           - cigarette
           use_coco_classes: false
+        evaluation.baseline_weights_path: models/current_best/best.pt
         prepare.val_split: 0.1
         train:
           model_size: m
@@ -93,22 +100,22 @@ stages:
           epochs: 50
           batch_size: 8
           finetune_mode: false
-          pretrained_model_path: taco-uav-model.pt
+          pretrained_model_path: models/current_best/best.pt
           finetune_lr: 0.0001
           finetune_epochs: 60
           freeze_backbone: false
     outs:
     - path: metrics.json
       hash: md5
-      md5: d61af0b8feec43999cf9d9047e5fe6d5
-      size: 395
+      md5: 74ef5ec037231c29e6cfec2ec3319991
+      size: 390
     - path: results_comparison/
       hash: md5
-      md5: f3904d8d5bea8d08718325f5f246abfc.dir
-      size: 2031
+      md5: 93bb18690d5ad434ac1ac9e434dba8a3.dir
+      size: 1967
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 50d51bccccef7360b53c5060ea1dbd2c.dir
-      size: 400574540
-      nfiles: 119
+      md5: 601950f6fb51aa8d4203d55d1d458f29.dir
+      size: 399735189
+      nfiles: 118
