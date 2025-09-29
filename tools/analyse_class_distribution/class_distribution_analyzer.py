@@ -12,6 +12,7 @@ SMALL_MAX_AREA = 32 ** 2
 MEDIUM_MAX_AREA = 96 ** 2
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
 SIZE_BUCKETS: Sequence[str] = ("small", "medium", "large")
+DEFAULT_EXPORT_DIR = Path(__file__).resolve().parent / "analysis_output"
 
 
 class AnalysisError(Exception):
@@ -356,8 +357,8 @@ Examples:
         "--output",
         "-o",
         type=str,
-        default="analysis_output",
-        help="Output directory for exports (default: analysis_output)",
+        default=str(DEFAULT_EXPORT_DIR),
+        help="Output directory for exports (default: tool-local analysis_output)",
     )
     parser.add_argument(
         "--export-json",

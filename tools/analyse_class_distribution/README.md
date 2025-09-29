@@ -37,7 +37,7 @@ python class_distribution_analyzer.py --dataset ../../datasets/waste-detection -
 ## Parameters
 
 - `--dataset`, `-d`: Path to dataset directory containing dataset.yaml (required)
-- `--output`, `-o`: Output directory for exports (default: analysis_output)
+- `--output`, `-o`: Output directory for exports (default: tools/analyse_class_distribution/analysis_output)
 - `--export-json`: Export results to JSON file
 - `--quiet`, `-q`: Suppress console output (only show errors)
 
