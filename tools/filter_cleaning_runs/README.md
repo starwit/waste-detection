@@ -5,10 +5,13 @@ This tool filters recorded videos from street cleaners and extracts only these s
 Samples:
 ```sh
 # Simplest call
-python filter_cleaning_runs.py ./input ./output
+poetry run python main.py ./input ./output
 
 # Filtering out waste facility area
-python filter_cleaning_runs.py ./input ./output --facility-area 52.42691465669094,10.855876062481274,52.41970634676204,10.875833665085436
+poetry run python main.py ./input ./output --facility-area 52.42691465669094,10.855876062481274,52.41970634676204,10.875833665085436
+
+# Using visual classfier to determine cleaning status
+poetry run python main.py ./input ./output --classifier-weights ./path/to/classfier
 ``` 
 The script has many configuration parameters for segment filtering. The defaults are sensible, but please check the scripts help output for more information.
 
