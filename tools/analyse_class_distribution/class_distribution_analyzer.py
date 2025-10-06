@@ -358,7 +358,7 @@ Examples:
         "-o",
         type=str,
         default=str(DEFAULT_EXPORT_DIR),
-        help="Output directory for exports (default: tool-local analysis_output)",
+        help="Output directory for exports (default: %(default)s)",
     )
     parser.add_argument(
         "--export-json",
