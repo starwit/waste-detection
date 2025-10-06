@@ -22,7 +22,6 @@ prepare:
     # Example: oversample a folder - use 200% means each image appears twice
     cw32-08-07-train: 2.0
     cw33-auto-mined: 2.0
-    cw36-auto-mined: 2.0
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
