@@ -232,21 +232,11 @@ def _apply_subset_sampling(
     subset_ratio: float
 ) -> List[ImageLabelPair]:
     if subset_ratio > 1:
-        original_count = len(pairs)
-        oversample_factor = int(subset_ratio)
-        remainder = subset_ratio - oversample_factor
-        oversampled_pairs = pairs * oversample_factor
-        if remainder > 0:
-            pairs_copy = pairs.copy()
-            random.shuffle(pairs_copy)
-            partial_count = int(len(pairs) * remainder)
-            oversampled_pairs.extend(pairs_copy[:partial_count])
         print(
-            f"Folder '{folder_name}': Oversampled to "
-            f"{len(oversampled_pairs)} images from {original_count} "
-            f"({subset_ratio*100:.1f}%)"
+            f"Folder '{folder_name}': Oversampling requested "
+            f"({subset_ratio*100:.1f}%), applied to training split only"
         )
-        return oversampled_pairs
+        return pairs
 
     elif 0 < subset_ratio < 1:
         original_count = len(pairs)
@@ -482,6 +472,45 @@ def _dedupe_pairs(
             print("No duplicates found between different folders")
 
     return processed_pairs
+
+
+def _oversample_train_pairs(
+    train_pairs: List[ImageLabelPair],
+    folder_subsets: Dict[str, float]
+) -> List[ImageLabelPair]:
+    if not folder_subsets:
+        return train_pairs
+
+    extended_pairs = list(train_pairs)
+    for folder_name, ratio in folder_subsets.items():
+        if ratio <= 1:
+            continue
+
+        folder_pairs = [pair for pair in train_pairs if pair.scene == folder_name]
+        if not folder_pairs:
+            continue
+
+        oversample_factor = int(ratio)
+        remainder = ratio - oversample_factor
+
+        duplicates: List[ImageLabelPair] = []
+        if oversample_factor > 1:
+            duplicates.extend(folder_pairs * (oversample_factor - 1))
+
+        if remainder > 0:
+            folder_copy = folder_pairs.copy()
+            random.shuffle(folder_copy)
+            partial_count = int(len(folder_pairs) * remainder)
+            duplicates.extend(folder_copy[:partial_count])
+
+        if duplicates:
+            print(
+                f"Folder '{folder_name}': Added {len(duplicates)} extra training copies "
+                f"({ratio*100:.1f}%)"
+            )
+            extended_pairs.extend(duplicates)
+
+    return extended_pairs
 
 
 def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True):
@@ -832,25 +861,52 @@ def process_single_images(
     val_pairs = image_label_pairs[test_size : test_size + val_size]
     train_pairs = image_label_pairs[test_size + val_size :]
 
+    # Apply oversampling to training pairs only to avoid leakage
+    train_pairs = _oversample_train_pairs(train_pairs, folder_subsets)
+
     # only add augmentation to training data
     train_pairs.extend(augmented_pairs)
 
     # Helper function to copy files with scene information
     def copy_pairs(pairs, img_path, label_path):
         count = 0
+
+        def with_dup_suffix(name: str, duplicate_index: int) -> str:
+            if duplicate_index == 0:
+                return name
+            stem, ext = os.path.splitext(name)
+            return f"{stem}__dup{duplicate_index}{ext}"
+
+        def link_or_copy(src: Path, dst: Path) -> None:
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+
+        name_counts: Dict[str, int] = {}
+
         for img_file, label_file, scene_name in pairs:
             if is_test_data:
-                # For test data, add scene suffix to filename
-                new_img_name = f"{img_file.stem}__scene_{scene_name}{img_file.suffix}"
-                new_label_name = (
+                base_img_name = f"{img_file.stem}__scene_{scene_name}{img_file.suffix}"
+                base_label_name = (
                     f"{label_file.stem}__scene_{scene_name}{label_file.suffix}"
                 )
             else:
-                new_img_name = img_file.name
-                new_label_name = label_file.name
+                base_img_name = img_file.name
+                base_label_name = label_file.name
 
-            shutil.copy(img_file, img_path / new_img_name)
-            shutil.copy(label_file, label_path / new_label_name)
+            duplicate_index = name_counts.get(base_img_name, 0)
+            name_counts[base_img_name] = duplicate_index + 1
+
+            new_img_name = with_dup_suffix(base_img_name, duplicate_index)
+            new_label_name = with_dup_suffix(base_label_name, duplicate_index)
+
+            target_img = img_path / new_img_name
+            target_label = label_path / new_label_name
+
+            link_or_copy(img_file, target_img)
+            link_or_copy(label_file, target_label)
+
             count += 1
         return count
 
