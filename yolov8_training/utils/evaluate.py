@@ -52,6 +52,7 @@ def evaluate_and_log_model_results(
     train_epochs=0,
     is_original=False,
     baseline_model=None,
+    baseline_display_name=None,
 ):
     """
     Evaluates the model on the test set, prepares metadata, and appends results to the CSV.
@@ -86,7 +87,12 @@ def evaluate_and_log_model_results(
             # Use the provided baseline_model if available, otherwise fall back to COCO model
             if baseline_model is not None:
                 base_model = baseline_model
-                print(f"Using provided baseline model for comparison")
+                base_model_name = (
+                    str(baseline_display_name)
+                    if baseline_display_name
+                    else getattr(baseline_model, "model_name", "Baseline Model")
+                )
+                print(f"Using provided baseline model for comparison: {base_model_name}")
             else:
                 # Extract model size for fallback to COCO model
                 model_size = "m"  # Default size if we can't determine it
@@ -98,15 +104,12 @@ def evaluate_and_log_model_results(
                             model_size = name[6]  # Extract the size character (n, s, m, l, x)
                 base_model = YOLO(f"yolov8{model_size}.pt")
                 print(f"Using COCO baseline model: yolov8{model_size}.pt")
-                
+                base_model_name = f"YOLOv8{model_size} (COCO)"
+
             base_results = validate_model(
                 base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0, write_json=False
             )
             # Determine base model name for display
-            if baseline_model is not None:
-                base_model_name = f"{model_name.replace('-finetune', '')}-pretrained"
-            else:
-                base_model_name = f"YOLOv8{model_size} (COCO)"
             mean_table(base_results, results, model_name, True, base_model_name)
         except Exception as e:
             print(f"Warning: Could not load base model for comparison: {e}")

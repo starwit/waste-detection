@@ -21,6 +21,7 @@ prepare:
     taco: 0.2
     # Example: oversample a folder - use 200% means each image appears twice
     cw32-08-07-train: 2.0
+    cw33-auto-mined: 2.0
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
@@ -29,7 +30,9 @@ train:
   batch_size: 8
   # Fine-tuning configuration
   finetune_mode: false  # Set to true to enable fine-tuning
-  pretrained_model_path: yolov8m.pt    # Path to pre-trained model
+  pretrained_model_path: models/current_best/best.pt    # Path to pre-trained model
   finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
   finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
   freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
+evaluation:
+  baseline_weights_path: models/current_best/best.pt  # Optional .pt weights to use as baseline for comparisons

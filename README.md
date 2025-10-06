@@ -37,6 +37,25 @@ This repo publishes trained models with each GitHub Release and also tracks the 
   - `test_metrics.json`: evaluation metrics of the promoted run
   - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
 
+### Baseline comparisons
+
+The training pipeline loads a baseline model from `evaluation.baseline_weights_path` in `params.yaml` (defaults to `models/current_best/best.pt`). If that file is missing, evaluation falls back to the public YOLOv8 COCO checkpoint that matches the configured `train.model_size`. Keep `models/current_best/` up to date to ensure comparisons always run against your latest promoted model.
+
+When you want to make a freshly trained run the new comparison baseline:
+
+1. Export the run’s best weights (and optional metadata) into `models/current_best/`:
+   ```bash
+   python yolov8_training/utils/export_baseline.py --run-dir runs/<experiment_name>
+   ```
+   You can override the weights or metadata paths via CLI flags if needed.
+2. Track the updated files with DVC so others can fetch them:
+   ```bash
+   dvc add models/current_best/best.pt models/current_best/metadata.yaml
+   dvc push
+   ```
+
+After these steps, subsequent training runs will compare against the newly exported baseline automatically.
+
 
 ## Initial Project Setup
 
