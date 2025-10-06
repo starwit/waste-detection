@@ -75,6 +75,42 @@ def _resolve_save_dir(model, results, default: Path) -> Path:
 
     return default
 
+
+def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
+    """Return YOLO model and display name loaded from the given path if it exists."""
+    if not path_candidate:
+        return None, None
+
+    candidate_path = Path(path_candidate).expanduser()
+    if not candidate_path.is_absolute():
+        candidate_path = Path.cwd() / candidate_path
+
+    if not candidate_path.exists():
+        print(f"Warning: Baseline weights not found at {candidate_path}")
+        return None, None
+
+    try:
+        model_instance = YOLO(str(candidate_path))
+    except Exception as load_error:
+        print(f"Warning: Could not load baseline model from {candidate_path}: {load_error}")
+        return None, None
+
+    display_name = None
+    try:
+        meta_path = candidate_path.parent / "metadata.yaml"
+        if meta_path.exists():
+            with open(meta_path, "r") as mf:
+                meta = yaml.safe_load(mf) or {}
+            display_name = (
+                meta.get("experiment_name")
+                or meta.get("baseline_display_name")
+                or meta.get("run_name")
+            )
+    except Exception:
+        display_name = None
+
+    return model_instance, (display_name or candidate_path.stem)
+
 def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
     finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False
@@ -406,37 +442,6 @@ def run_train_eval_stage(args):
     # Determine baseline model for comparison
     baseline_model = None
     baseline_display_name = None
-
-    def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
-        if not path_candidate:
-            return None, None
-        candidate_path = Path(path_candidate).expanduser()
-        if not candidate_path.is_absolute():
-            candidate_path = Path.cwd() / candidate_path
-        if not candidate_path.exists():
-            print(f"Warning: Baseline weights not found at {candidate_path}")
-            return None, None
-        try:
-            model_instance = YOLO(str(candidate_path))
-            # Try to infer a friendly display name from sibling metadata
-            display_name = None
-            try:
-                meta_path = candidate_path.parent / "metadata.yaml"
-                if meta_path.exists():
-                    with open(meta_path, "r") as mf:
-                        meta = yaml.safe_load(mf) or {}
-                    display_name = (
-                        meta.get("experiment_name")
-                        or meta.get("baseline_display_name")
-                        or meta.get("run_name")
-                    )
-            except Exception as _:
-                display_name = None
-
-            return model_instance, (display_name or candidate_path.stem)
-        except Exception as load_error:
-            print(f"Warning: Could not load baseline model from {candidate_path}: {load_error}")
-            return None, None
 
     # 1) Highest priority: explicitly configured baseline weights
     baseline_model, baseline_display_name = _load_baseline_from_path(baseline_weights_path)
