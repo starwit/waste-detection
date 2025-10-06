@@ -1,0 +1,20 @@
+[project]
+name = "class-distribution-analyzer"
+version = "0.1.0"
+description = "Class distribution analysis tool for YOLO format datasets"
+
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "pathlib",
+    "dataclasses",
+    "pillow>=9.0.0"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
