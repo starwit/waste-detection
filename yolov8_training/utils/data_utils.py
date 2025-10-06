@@ -842,14 +842,8 @@ def process_single_images(
     # Continue with the processed pairs instead of original image_label_pairs
     image_label_pairs = processed_pairs
 
-    # add augmentation to the remaining images
-    augmented_pairs, aug_temp_folders = augment(image_label_pairs, augment_multiplier)
-
-    temp_folders.extend(aug_temp_folders)
-
     # Shuffle data
     random.shuffle(image_label_pairs)
-    random.shuffle(augmented_pairs)
 
     # Calculate split indices
     total_images = len(image_label_pairs)
@@ -863,6 +857,13 @@ def process_single_images(
 
     # Apply oversampling to training pairs only to avoid leakage
     train_pairs = _oversample_train_pairs(train_pairs, folder_subsets)
+
+    # add augmentation after oversampling so duplicates receive augmentations too
+    augmented_pairs, aug_temp_folders = augment(train_pairs, augment_multiplier)
+
+    temp_folders.extend(aug_temp_folders)
+
+    random.shuffle(augmented_pairs)
 
     # only add augmentation to training data
     train_pairs.extend(augmented_pairs)
