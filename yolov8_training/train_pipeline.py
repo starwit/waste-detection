@@ -22,6 +22,46 @@ from yolov8_training.utils.evaluate import (
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
 
+def _ensure_default_baseline_stub() -> None:
+    """Touch the default baseline path so DVC deps resolve even on fresh clones."""
+
+    try:
+        params = _load_params_yaml()
+    except Exception:
+        params = {}
+
+    baseline_candidates = {
+        params.get("train", {}).get("pretrained_model_path"),
+        params.get("evaluation", {}).get("baseline_weights_path"),
+    }
+
+    root_baseline_dir = (Path.cwd() / "models" / "current_best").resolve()
+
+    for path_str in baseline_candidates:
+        if not path_str:
+            continue
+        candidate = Path(path_str)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            resolved = candidate.resolve(strict=False)
+        except TypeError:
+            resolved = candidate.resolve()
+
+        try:
+            if not resolved.is_relative_to(root_baseline_dir):
+                continue
+        except AttributeError:
+            if root_baseline_dir not in resolved.parents and resolved != root_baseline_dir:
+                continue
+
+        if candidate.exists():
+            continue
+
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.touch()
+
+
 def _load_params_yaml():
     """Load and return params from params.yaml as a dict, or {} on failure."""
     try:
@@ -85,7 +125,7 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
     if not candidate_path.is_absolute():
         candidate_path = Path.cwd() / candidate_path
 
-    if not candidate_path.exists():
+    if not candidate_path.exists() or candidate_path.stat().st_size == 0:
         print(f"Warning: Baseline weights not found at {candidate_path}")
         return None, None
 
@@ -136,18 +176,22 @@ def train_model(
         Path: Directory path of the training output.
     """
     # Choose model based on fine-tuning mode
-    if finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
+    pretrained_model = None
+    if pretrained_model_path:
+        candidate = Path(pretrained_model_path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        if candidate.exists() and candidate.stat().st_size > 0:
+            pretrained_model = candidate
+
+    if finetune_mode and pretrained_model is not None:
         print(f"Fine-tuning mode enabled. Loading pre-trained model: {pretrained_model_path}")
-        model = YOLO(pretrained_model_path)
-        
-        # Update experiment name to indicate fine-tuning
+        model = YOLO(str(pretrained_model))
         experiment_name = f"{experiment_name}-finetune"
     else:
-        if finetune_mode:
+        if finetune_mode and pretrained_model_path:
             print(f"Warning: Fine-tuning mode enabled but pre-trained model not found at {pretrained_model_path}")
             print("Falling back to training from scratch with YOLO checkpoint")
-        # Robust fallback: attempt to load the official YOLO checkpoint.
-        # If unavailable (e.g., offline and not cached), raise a clear error.
         checkpoint_name = f"yolov8{model_size}.pt"
         try:
             model = YOLO(checkpoint_name)
@@ -392,6 +436,8 @@ def run_prepare_stage(args):
 
     # Print results
     detector.print_folder_comparison_results(matches)
+
+    _ensure_default_baseline_stub()
     return
 
 def run_train_eval_stage(args):
