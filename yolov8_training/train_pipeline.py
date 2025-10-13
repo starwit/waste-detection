@@ -146,7 +146,18 @@ def train_model(
         if finetune_mode:
             print(f"Warning: Fine-tuning mode enabled but pre-trained model not found at {pretrained_model_path}")
             print("Falling back to training from scratch with YOLO checkpoint")
-        model = YOLO(f"yolov8{model_size}.pt")
+        # Robust fallback: attempt to load the official YOLO checkpoint.
+        # If unavailable (e.g., offline and not cached), raise a clear error.
+        checkpoint_name = f"yolov8{model_size}.pt"
+        try:
+            model = YOLO(checkpoint_name)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to initialize training without local weights. "
+                f"Tried to load official checkpoint '{checkpoint_name}' but it could not be "
+                "downloaded or loaded. Ensure network access or provide a valid "
+                "train.pretrained_model_path in params.yaml."
+            ) from e
     
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -453,7 +464,15 @@ def run_train_eval_stage(args):
     # 3) Final fallback: COCO checkpoint matching the requested model size
     if baseline_model is None:
         baseline_checkpoint = f"yolov8{model_size}.pt"
-        baseline_model = YOLO(baseline_checkpoint)
+        try:
+            baseline_model = YOLO(baseline_checkpoint)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to load a baseline model. No local baseline weights were found "
+                "and loading the official YOLO checkpoint also failed. "
+                f"Attempted checkpoint: '{baseline_checkpoint}'. Ensure network access or set "
+                "evaluation.baseline_weights_path to a valid local file."
+            ) from e
         baseline_display_name = f"yolov8{model_size}-coco"
 
     # Evaluate and log results for the baseline model

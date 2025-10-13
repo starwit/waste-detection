@@ -40,8 +40,6 @@ stages:
       - yolov8_training/utils/data_utils.py
       - yolov8_training/utils/find_duplicates.py
       - datasets/${data.dataset_name}
-      - ${train.pretrained_model_path}
-      - ${evaluation.baseline_weights_path}
     outs:
       - runs
       - results_comparison/
