@@ -39,7 +39,11 @@ This repo publishes trained models with each GitHub Release and also tracks the 
 
 ### Baseline comparisons
 
-The training pipeline loads a baseline model from `evaluation.baseline_weights_path` in `params.yaml` (defaults to `models/current_best/best.pt`). If that file is missing, evaluation falls back to the public YOLOv8 COCO checkpoint that matches the configured `train.model_size`. Keep `models/current_best/` up to date to ensure comparisons always run against your latest promoted model.
+The training pipeline loads a baseline model for comparison during evaluation:
+
+- **First tries:** `evaluation.baseline_weights_path` from params.yaml (defaults to `models/current_best/best.pt`)
+- **Then tries:** Fine-tune weights if in finetune mode
+- **Falls back to:** Official YOLOv8 COCO checkpoint (always works, even on fresh clones)
 
 When you want to make a freshly trained run the new comparison baseline:
 

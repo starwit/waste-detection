@@ -23,7 +23,28 @@ from yolov8_training.utils.find_duplicates import DuplicateDetector
 
 
 def _ensure_default_baseline_stub() -> None:
-    """Touch the default baseline path so DVC deps resolve even on fresh clones."""
+    """
+    Create an empty stub file for baseline weights to satisfy DVC dependency tracking.
+    
+    WHY THIS EXISTS:
+    - DVC requires all dependencies to exist before running pipelines
+    - models/current_best/ is listed as a dependency in dvc.yaml
+    - On fresh clones, this directory exists but best.pt doesn't
+    - Without this stub, `dvc repro` would fail with "file does not exist"
+    
+    THE STUB IS NEVER USED FOR TRAINING:
+    - The stub is a 0-byte placeholder file
+    - All baseline loading functions check: file.stat().st_size > 0
+    - 0-byte files are rejected, triggering fallback to COCO baseline
+    - See _load_baseline_from_path() for the size check
+    
+    ALTERNATIVES CONSIDERED:
+    - Remove models/current_best/ from dvc.yaml deps: Loses change tracking
+    - Use dvc repro --allow-missing: Requires changing all CI/CD commands
+    - Current stub approach: Works reliably, proven in production
+    
+    See BASELINE_MANAGEMENT.md for detailed documentation.
+    """
 
     try:
         params = _load_params_yaml()
@@ -117,7 +138,22 @@ def _resolve_save_dir(model, results, default: Path) -> Path:
 
 
 def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
-    """Return YOLO model and display name loaded from the given path if it exists."""
+    """
+    Load YOLO baseline model from a path if it exists and is valid.
+    
+    Args:
+        path_candidate: Path to a .pt weights file (can be relative or absolute)
+    
+    Returns:
+        (model, display_name) if successful, (None, None) otherwise
+    
+    IMPORTANT SIZE CHECK:
+        The check `st_size == 0` is critical for handling stub files created by
+        _ensure_default_baseline_stub(). These 0-byte placeholder files satisfy
+        DVC's dependency tracking but should never be used for actual training.
+        
+        This ensures graceful fallback to COCO baseline on fresh clones.
+    """
     if not path_candidate:
         return None, None
 
@@ -125,6 +161,7 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
     if not candidate_path.is_absolute():
         candidate_path = Path.cwd() / candidate_path
 
+    # Check exists AND size > 0 to reject stub files
     if not candidate_path.exists() or candidate_path.stat().st_size == 0:
         print(f"Warning: Baseline weights not found at {candidate_path}")
         return None, None
@@ -510,6 +547,11 @@ def run_train_eval_stage(args):
     # 3) Final fallback: COCO checkpoint matching the requested model size
     if baseline_model is None:
         baseline_checkpoint = f"yolov8{model_size}.pt"
+        print(f"\n{'='*70}")
+        print(f"No custom baseline model found.")
+        print(f"Using official YOLOv8 COCO checkpoint: {baseline_checkpoint}")
+        print(f"To use a custom baseline, see BASELINE_MANAGEMENT.md")
+        print(f"{'='*70}\n")
         try:
             baseline_model = YOLO(baseline_checkpoint)
         except Exception as e:
