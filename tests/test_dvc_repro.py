@@ -66,9 +66,10 @@ def _collect_changed_deps(status: dict) -> set[str]:
 def _get_stage(repo: Repo, name: str):
     for stage in repo.index.stages:
         addressing = getattr(stage, "addressing", None)
-        if addressing == name or stage.name == name:
+        stage_name = getattr(stage, "name", None)
+        if addressing == name or stage_name == name:
             return stage
-    available = [getattr(s, "addressing", s.name) for s in repo.index.stages]
+    available = [getattr(s, "addressing", getattr(s, "name", "unknown")) for s in repo.index.stages]
     raise RuntimeError(f"Stage '{name}' not found. Available: {available}")
 
 
