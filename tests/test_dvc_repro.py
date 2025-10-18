@@ -138,7 +138,10 @@ def test_dvc_repro_invalidates_when_baseline_changes(tmp_path: Path):
             stage = _get_stage(repo, "train_and_evaluate")
             promoted_status = stage.status()
 
-    assert "models/current_best" in _collect_changed_deps(promoted_status)
+    # DVC now tracks the specific file, not just the directory
+    changed = _collect_changed_deps(promoted_status)
+    assert any("models/current_best" in dep for dep in changed), \
+        f"Expected baseline path change, got: {changed}"
 
     subprocess.run(
         [sys.executable, "-m", "dvc", "repro", "train_and_evaluate"],
@@ -162,4 +165,7 @@ def test_dvc_repro_invalidates_when_baseline_changes(tmp_path: Path):
             stage = _get_stage(repo, "train_and_evaluate")
             changed_status = stage.status()
 
-    assert "models/current_best" in _collect_changed_deps(changed_status)
+    # DVC now tracks the specific file, not just the directory
+    changed = _collect_changed_deps(changed_status)
+    assert any("models/current_best" in dep for dep in changed), \
+        f"Expected baseline path change, got: {changed}"

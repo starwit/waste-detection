@@ -24,63 +24,63 @@ from yolov8_training.utils.find_duplicates import DuplicateDetector
 
 def _ensure_default_baseline_stub() -> None:
     """
-    Create an empty stub file for baseline weights to satisfy DVC dependency tracking.
+    Create stub files for DEFAULT baseline paths, or error on missing CUSTOM paths.
     
     WHY THIS EXISTS:
     - DVC requires all dependencies to exist before running pipelines
-    - models/current_best/ is listed as a dependency in dvc.yaml
-    - On fresh clones, this directory exists but best.pt doesn't
-    - Without this stub, `dvc repro` would fail with "file does not exist"
+    - On fresh clones, baseline weights don't exist yet
+    - Creating stubs for DEFAULT paths lets fresh clones work
+    - Erroring on CUSTOM paths catches configuration mistakes early
+    
+    BEHAVIOR:
+    - Default path missing → Create 0-byte stub (satisfies DVC, rejected by training)
+    - Custom path missing → Raise clear error (user misconfigured)
+    - Any path exists → Skip (already valid)
     
     THE STUB IS NEVER USED FOR TRAINING:
-    - The stub is a 0-byte placeholder file
     - All baseline loading functions check: file.stat().st_size > 0
     - 0-byte files are rejected, triggering fallback to COCO baseline
     - See _load_baseline_from_path() for the size check
-    
-    ALTERNATIVES CONSIDERED:
-    - Remove models/current_best/ from dvc.yaml deps: Loses change tracking
-    - Use dvc repro --allow-missing: Requires changing all CI/CD commands
-    - Current stub approach: Works reliably, proven in production
-    
-    See BASELINE_MANAGEMENT.md for detailed documentation.
     """
-
+    DEFAULT_BASELINE_PATH = "models/current_best/best.pt"
+    
     try:
         params = _load_params_yaml()
     except Exception:
         params = {}
 
-    baseline_candidates = {
-        params.get("train", {}).get("pretrained_model_path"),
-        params.get("evaluation", {}).get("baseline_weights_path"),
-    }
+    paths_to_check = [
+        ("train.pretrained_model_path", params.get("train", {}).get("pretrained_model_path")),
+        ("evaluation.baseline_weights_path", params.get("evaluation", {}).get("baseline_weights_path")),
+    ]
 
-    root_baseline_dir = (Path.cwd() / "models" / "current_best").resolve()
-
-    for path_str in baseline_candidates:
+    for param_name, path_str in paths_to_check:
         if not path_str:
             continue
+            
         candidate = Path(path_str)
         if not candidate.is_absolute():
             candidate = Path.cwd() / candidate
-        try:
-            resolved = candidate.resolve(strict=False)
-        except TypeError:
-            resolved = candidate.resolve()
 
-        try:
-            if not resolved.is_relative_to(root_baseline_dir):
-                continue
-        except AttributeError:
-            if root_baseline_dir not in resolved.parents and resolved != root_baseline_dir:
-                continue
-
+        # Skip if file already exists
         if candidate.exists():
             continue
 
-        candidate.parent.mkdir(parents=True, exist_ok=True)
-        candidate.touch()
+        # Normalize paths for comparison
+        is_default = str(Path(path_str)).replace("\\", "/") == DEFAULT_BASELINE_PATH
+        
+        if is_default:
+            # Create stub for default path (fresh clone scenario)
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.touch()
+            print(f"Created stub file for {param_name}: {candidate}")
+        else:
+            # Custom path doesn't exist - create stub with warning
+            # This allows fine-tune mode to work even when baseline doesn't exist yet
+            print(f"Warning: {param_name} = '{path_str}' does not exist")
+            print(f"Creating stub file. Training will fall back to COCO baseline.")
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.touch()
 
 
 def _load_params_yaml():
@@ -602,6 +602,26 @@ def run_train_eval_stage(args):
     )
 
     delete_unused_folders()
+    
+    # Print guidance for exporting baseline
+    _print_export_guidance(train_output_dir, final_experiment_name)
+
+
+def _print_export_guidance(train_output_dir: Path, experiment_name: str) -> None:
+    """
+    Print helpful guidance for exporting the trained model as the new baseline.
+    """
+    print("\n" + "=" * 70)
+    print("Training complete! Next steps:")
+    print("=" * 70)
+    print("\nTo make this run the baseline for future comparisons:\n")
+    print(f"  python yolov8_training/utils/export_baseline.py --run-dir {train_output_dir}")
+    print("\nThen track it with DVC:\n")
+    print("  dvc add models/current_best/best.pt models/current_best/metadata.yaml")
+    print("  dvc push")
+    print("  git add models/current_best/best.pt.dvc models/current_best/metadata.yaml.dvc")
+    print(f"  git commit -m \"Update baseline to {experiment_name}\"")
+    print("\n" + "=" * 70 + "\n")
 
 def main(args):
     """
