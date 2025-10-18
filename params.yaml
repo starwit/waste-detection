@@ -26,7 +26,7 @@ prepare:
 train:
   model_size: m
   image_size: 1280
-  epochs: 50
+  epochs: 1
   batch_size: 8
   # Fine-tuning configuration
   finetune_mode: false  # Set to true to enable fine-tuning
@@ -35,4 +35,8 @@ train:
   finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
   freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
 evaluation:
-  baseline_weights_path: models/current_best/best.pt  # Optional .pt weights to use as baseline for comparisons
+  # Baseline model for evaluation comparisons (optional)
+  # - If file exists and has content: compares your trained model against it
+  # - If missing/empty: automatically uses YOLOv8 COCO checkpoint as baseline
+  # - See BASELINE_MANAGEMENT.md for details on baseline selection priority
+  baseline_weights_path: models/current_best/best.pt
