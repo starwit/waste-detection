@@ -1,8 +1,8 @@
-experiment_name: two-stage-finetune-cw-36-fixed-finetune
+experiment_name: new-finetune-with-cw-36-finetune
 image_size: 1280
-model_size: runs/two-stage-finetune-cw-36-fixed-finetune_ftA/weights/best.pt
-num_epochs: 60
+model_size: /home/starwit01/workspaces/edgar/waste-detection/waste-detection/models/current_best/best.pt
+num_epochs: 40
 split_parameters:
   val_split: 0.1
-source_run: runs/two-stage-finetune-cw-36-fixed-finetune
-source_weights: runs/two-stage-finetune-cw-36-fixed-finetune/weights/best.pt
+source_run: runs/new-finetune-with-cw-36-finetune
+source_weights: runs/new-finetune-with-cw-36-finetune/weights/best.pt

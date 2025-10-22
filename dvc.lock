@@ -6,21 +6,21 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: 20d6993ead63ad4a3164b293e62e46d1.dir
-      size: 4798723457
-      nfiles: 16368
+      md5: 4bba90713f5b94ddeee530e4c3ce6138.dir
+      size: 4991782754
+      nfiles: 16712
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: d5031c89702f360c1f1977df0f61f9b9
-      size: 31418
+      md5: d89bb2f1502658172d4ab883cddaf77c
+      size: 28511
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 38a368a473e8988316458217193908c5
-      size: 36468
+      md5: b50eee35ce35a284f5c4932973babae3
+      size: 37677
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
       md5: f62195cfe2b869f50bc9ef17cd3a7773
@@ -39,7 +39,7 @@ stages:
           test_split: 0.1
           augment_multiplier: 1
           auto_replay:
-            enabled: true
+            enabled: false
             max_new: 200
             max_total: 400
             iou_thr: 0.5
@@ -49,27 +49,27 @@ stages:
             seed: 42
             dest: raw_data/train/replay
           folder_subsets:
+            uavvaste: 0.1
+            taco: 0.02
+            cw32-08-07-train: 0.3
+            cw33: 0.3
             cw36-auto-mined: 2.0
-            replay: 2.0
-            cw33: 200
-            cw32-08-07-train: 200
-            taco: 100
-            uavvaste: 200
+            replay: 1.0
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 7c662b5e5903d5d89d33c5472e5c430b.dir
-      size: 2646504181
-      nfiles: 3664
+      md5: edbf44517d102546368f844c32f291b7.dir
+      size: 1826522369
+      nfiles: 2860
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: 4e6f4e1be3a461974eb6d8c351255a25.dir
-      size: 2647067171
-      nfiles: 3667
+      md5: f5c338992b8a431fe52a0c2d0ccc1ee4.dir
+      size: 1826962291
+      nfiles: 2863
     - path: models/current_best/best.pt
       hash: md5
       md5: c2ced17998066eb9765c5ba587d7d4c7
@@ -80,12 +80,12 @@ stages:
       size: 52186507
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: d5031c89702f360c1f1977df0f61f9b9
-      size: 31418
+      md5: d89bb2f1502658172d4ab883cddaf77c
+      size: 28511
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 38a368a473e8988316458217193908c5
-      size: 36468
+      md5: b50eee35ce35a284f5c4932973babae3
+      size: 37677
     - path: yolov8_training/utils/evaluate.py
       hash: md5
       md5: 46be88fba6d64b3c33f1faa46632505b
@@ -112,37 +112,28 @@ stages:
           batch_size: 8
           finetune_mode: true
           pretrained_model_path: models/current_best/best.pt
-          finetune_lr: 0.0001
-          finetune_epochs: 60
+          finetune_lr: 0.0008
+          finetune_epochs: 40
           freeze_backbone: false
-          two_phase_finetune: true
-          ft_freeze_layers: 10
-          ft_head_epochs: 10
-          ft_head_lr: 0.002
-          ft_all_lr: 0.0005
+          optimizer: AdamW
+          mosaic: 0.15
+          close_mosaic: 5
+          mixup: 0.0
           cos_lr: true
           lrf: 0.05
-          patience: 25
-          mosaic_head: 0.5
-          mosaic_all: 0.1
-          mixup: 0.0
-          close_mosaic_head: 5
-          close_mosaic_all: 5
-          image_weights: true
-          label_smoothing: 0.0
-          optimizer: AdamW
+          patience: 20
     outs:
     - path: metrics.json
       hash: md5
-      md5: 7a38d74920dd0532d12abe85aa33fcdb
-      size: 457
+      md5: 7834885370ba55a48a08190e5d92bc5d
+      size: 453
     - path: results_comparison/
       hash: md5
-      md5: dceae469711b018f787b705091735793.dir
-      size: 2204
+      md5: daf24a463550e7e7ea9ff48bfcaa8b07.dir
+      size: 2169
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 813591fb97575e049a0ed3b78e161b8b.dir
-      size: 705259643
-      nfiles: 214
+      md5: 1aee4695123866ff07177a6071517508.dir
+      size: 594777925
+      nfiles: 190
