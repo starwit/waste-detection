@@ -550,7 +550,6 @@ def run_train_eval_stage(args):
         print(f"\n{'='*70}")
         print(f"No custom baseline model found.")
         print(f"Using official YOLOv8 COCO checkpoint: {baseline_checkpoint}")
-        print(f"To use a custom baseline, see BASELINE_MANAGEMENT.md")
         print(f"{'='*70}\n")
         try:
             baseline_model = YOLO(baseline_checkpoint)
