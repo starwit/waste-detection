@@ -38,5 +38,4 @@ evaluation:
   # Baseline model for evaluation comparisons (optional)
   # - If file exists and has content: compares your trained model against it
   # - If missing/empty: automatically uses YOLOv8 COCO checkpoint as baseline
-  # - See BASELINE_MANAGEMENT.md for details on baseline selection priority
   baseline_weights_path: models/current_best/best.pt
