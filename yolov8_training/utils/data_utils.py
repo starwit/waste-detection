@@ -229,16 +229,50 @@ def remap_yaml_dataset_labels(dataset_dir: Path, target_class_mapping: dict) -> 
 def _apply_subset_sampling(
     folder_name: str,
     pairs: List[ImageLabelPair],
-    subset_ratio: float
+    subset_ratio
 ) -> List[ImageLabelPair]:
-    if subset_ratio > 1:
+    """Apply per-folder sampling/oversampling.
+
+    subset_ratio can be:
+    - float >1.0   → oversample (handled later in _oversample_train_pairs)
+    - float 0..1   → proportional subsample
+    - int / numeric string → absolute count (deterministic with the set seed)
+    """
+    # Absolute count support ("200" or 200). Treat 1 as 100% (not absolute 1).
+    if isinstance(subset_ratio, str) and subset_ratio.isdigit():
+        count = int(subset_ratio)
+        if count == 1:
+            subset_ratio = 1.0
+        elif count >= 2:
+            if count <= 0:
+                print(f"Warning: Invalid absolute count {subset_ratio} for '{folder_name}'.")
+                return pairs
+            pairs_copy = pairs.copy()
+            random.shuffle(pairs_copy)
+            take = min(count, len(pairs_copy))
+            print(f"Folder '{folder_name}': Using exactly {take} images (absolute count)")
+            return pairs_copy[:take]
+
+    if isinstance(subset_ratio, int):
+        count = int(subset_ratio)
+        if count == 1:
+            subset_ratio = 1.0
+        elif count >= 2:
+            pairs_copy = pairs.copy()
+            random.shuffle(pairs_copy)
+            take = min(count, len(pairs_copy))
+            print(f"Folder '{folder_name}': Using exactly {take} images (absolute count)")
+            return pairs_copy[:take]
+
+    # Float logic (ratios)
+    if isinstance(subset_ratio, float) and subset_ratio > 1:
         print(
             f"Folder '{folder_name}': Oversampling requested "
             f"({subset_ratio*100:.1f}%), applied to training split only"
         )
         return pairs
 
-    elif 0 < subset_ratio < 1:
+    elif isinstance(subset_ratio, float) and 0 < subset_ratio < 1:
         original_count = len(pairs)
         pairs_copy = pairs.copy()
         random.shuffle(pairs_copy)
@@ -249,7 +283,7 @@ def _apply_subset_sampling(
         )
         return pairs_copy[:subset_count]
 
-    elif subset_ratio == 1:
+    elif subset_ratio == 1 or subset_ratio == 1.0:
         print(
             f"Folder '{folder_name}': Using all "
             f"{len(pairs)} images (100%)"
@@ -425,8 +459,11 @@ def _dedupe_pairs(
             ImageLabelPair(img_path, lbl_path, scene_name)
         )
 
+    def _is_oversample(v) -> bool:
+        return isinstance(v, float) and v > 1.0
+
     oversampled_folders: Set[str] = {
-        folder_name for folder_name in folder_subsets.keys() if folder_subsets[folder_name] > 1
+        folder_name for folder_name, ratio in folder_subsets.items() if _is_oversample(ratio)
     }
 
     processed_pairs: List[ImageLabelPair] = []
@@ -483,7 +520,8 @@ def _oversample_train_pairs(
 
     extended_pairs = list(train_pairs)
     for folder_name, ratio in folder_subsets.items():
-        if ratio <= 1:
+        # oversample only if float > 1.0; integers are reserved for absolute counts
+        if not (isinstance(ratio, float) and ratio > 1.0):
             continue
 
         folder_pairs = [pair for pair in train_pairs if pair.scene == folder_name]

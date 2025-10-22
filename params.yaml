@@ -13,15 +13,26 @@ prepare:
   val_split: 0.1
   test_split: 0.1
   augment_multiplier: 1
+  # Optional: automatically build/maintain a small replay set from last run's
+  # validation split. Keeps hard/ambiguous frames for incremental fine-tunes.
+  auto_replay:
+    enabled: true         # set true to enable
+    max_new: 200           # add up to N new samples from last run
+    max_total: 400         # cap total replay size (oldest pruned)
+    iou_thr: 0.5           # IoU for matches
+    conf_thr: 0.25         # prediction threshold
+    border_conf: 0.35      # below this = borderline TP counted
+    include_empty: true    # include some background/empty frames
+    seed: 42
+    dest: raw_data/train/replay  # persistent location for replay set
   # Folder subset configuration - use only a percentage of images from specific folders
   folder_subsets:
-    # Example: use only 50% of images from uavvaste folder
-    uavvaste: 0.5
-    # Example: use only 30% of images from taco folder
-    taco: 0.2
-    # Example: oversample a folder - use 200% means each image appears twice
-    cw32-08-07-train: 2.0
-    cw33-auto-mined: 2.0
+    cw36-auto-mined: 2.0            # oversample new week 300%
+    replay: 2.0         # strong replay signal
+    cw33: 200            # exact 200 typical old frames
+    cw32-08-07-train: 200
+    taco: 100
+    uavvaste: 200
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
@@ -29,11 +40,29 @@ train:
   epochs: 50
   batch_size: 8
   # Fine-tuning configuration
-  finetune_mode: false  # Set to true to enable fine-tuning
+  finetune_mode: true  # Set to true to enable fine-tuning
   pretrained_model_path: models/current_best/best.pt    # Path to pre-trained model
   finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
   finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
   freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
+  # Two-phase fine-tuning (optional)
+  two_phase_finetune: true
+  ft_freeze_layers: 10
+  ft_head_epochs: 10
+  ft_head_lr: 0.002
+  ft_all_lr: 0.0005
+  cos_lr: true
+  lrf: 0.05
+  patience: 25
+  mosaic_head: 0.5
+  mosaic_all: 0.1
+  mixup: 0.0
+  close_mosaic_head: 5
+  close_mosaic_all: 5
+  image_weights: true
+  label_smoothing: 0.0
+  optimizer: AdamW
+
 evaluation:
   # Baseline model for evaluation comparisons (optional)
   # - If file exists and has content: compares your trained model against it
