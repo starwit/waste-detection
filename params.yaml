@@ -16,7 +16,7 @@ prepare:
   # Optional: automatically build/maintain a small replay set from last run's
   # validation split. Keeps hard/ambiguous frames for incremental fine-tunes.
   auto_replay:
-    enabled: true         # set true to enable
+    enabled: false         # set true to enable
     max_new: 200           # add up to N new samples from last run
     max_total: 400         # cap total replay size (oldest pruned)
     iou_thr: 0.5           # IoU for matches
@@ -27,12 +27,15 @@ prepare:
     dest: raw_data/train/replay  # persistent location for replay set
   # Folder subset configuration - use only a percentage of images from specific folders
   folder_subsets:
-    cw36-auto-mined: 2.0            # oversample new week 300%
-    replay: 2.0         # strong replay signal
-    cw33: 200            # exact 200 typical old frames
-    cw32-08-07-train: 200
-    taco: 100
-    uavvaste: 200
+    # Example: use only 50% of images from uavvaste folder
+    uavvaste: 0.1
+    # Example: use only 30% of images from taco folder
+    taco: 0.02
+    # Example: oversample a folder - use 200% means each image appears twice
+    cw32-08-07-train: 0.3
+    cw33: 0.3
+    cw36-auto-mined: 2.0
+    replay: 1.0
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
@@ -42,27 +45,16 @@ train:
   # Fine-tuning configuration
   finetune_mode: true  # Set to true to enable fine-tuning
   pretrained_model_path: models/current_best/best.pt    # Path to pre-trained model
-  finetune_lr: 0.0001   # Lower learning rate for fine-tuning (default YOLO lr is ~0.01)
-  finetune_epochs: 60  # Typically fewer epochs needed for fine-tuning
-  freeze_backbone: false # Whether to freeze backbone layers during fine-tuning
-  # Two-phase fine-tuning (optional)
-  two_phase_finetune: true
-  ft_freeze_layers: 10
-  ft_head_epochs: 10
-  ft_head_lr: 0.002
-  ft_all_lr: 0.0005
+  finetune_lr: 0.0008   # Suggested LR when fine-tuning with unfrozen backbone
+  finetune_epochs: 40   # Override total epochs during fine-tuning
+  freeze_backbone: false
+  optimizer: AdamW      # Prevent optimizer=auto from overriding lr0
+  mosaic: 0.15          # Gentle augmentations during fine-tuning
+  close_mosaic: 5
+  mixup: 0.0
   cos_lr: true
   lrf: 0.05
-  patience: 25
-  mosaic_head: 0.5
-  mosaic_all: 0.1
-  mixup: 0.0
-  close_mosaic_head: 5
-  close_mosaic_all: 5
-  image_weights: true
-  label_smoothing: 0.0
-  optimizer: AdamW
-
+  patience: 20
 evaluation:
   # Baseline model for evaluation comparisons (optional)
   # - If file exists and has content: compares your trained model against it

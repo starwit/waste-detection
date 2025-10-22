@@ -192,7 +192,7 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
 def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
     finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False,
-    two_phase_cfg: dict | None = None,
+    single_phase_overrides: dict | None = None,
 ):
     """
     Train the YOLO model on the specified dataset.
@@ -270,83 +270,7 @@ def train_model(
     if name:
         train_args["name"] = name
     
-    # Two-phase fine-tune path (optional)
-    if finetune_mode and two_phase_cfg and two_phase_cfg.get("enabled", False):
-        print("Two-phase fine-tune enabled.")
-
-        # Resolve config with defaults
-        freeze_layers = int(two_phase_cfg.get("ft_freeze_layers", 10))
-        head_epochs = int(two_phase_cfg.get("ft_head_epochs", 10))
-        all_lr = float(two_phase_cfg.get("ft_all_lr", 5e-4))
-        head_lr = float(two_phase_cfg.get("ft_head_lr", 2e-3))
-        cos_lr = bool(two_phase_cfg.get("cos_lr", True))
-        lrf = float(two_phase_cfg.get("lrf", 0.05))
-        patience = int(two_phase_cfg.get("patience", 25))
-        mosaic_head = float(two_phase_cfg.get("mosaic_head", 0.5))
-        mosaic_all = float(two_phase_cfg.get("mosaic_all", 0.25))
-        mixup = float(two_phase_cfg.get("mixup", 0.0))
-        close_mosaic_head = int(two_phase_cfg.get("close_mosaic_head", 5))
-        close_mosaic_all = int(two_phase_cfg.get("close_mosaic_all", 5))
-        label_smoothing = float(two_phase_cfg.get("label_smoothing", 0.0))
-        optimizer_choice = two_phase_cfg.get("optimizer", None)
-
-        # Phase A: head-only
-        name_A = f"{name or 'train'}_ftA"
-        args_A = dict(train_args)
-        args_A.update({
-            "epochs": min(head_epochs, epochs),
-            "freeze": list(range(freeze_layers)),
-            "lr0": head_lr,
-            "cos_lr": cos_lr,
-            "lrf": lrf,
-            "patience": patience,
-            "mosaic": mosaic_head,
-            "mixup": mixup,
-            "close_mosaic": close_mosaic_head,
-            "name": name_A,
-        })
-        if label_smoothing > 0:
-            args_A["label_smoothing"] = label_smoothing
-        if optimizer_choice and optimizer_choice != "auto":
-            args_A["optimizer"] = optimizer_choice
-        print(f"Phase A (head-only): epochs={args_A['epochs']}, lr0={head_lr}, freeze=0..{freeze_layers-1}")
-        results_A = model.train(**args_A)
-        dir_A = _resolve_save_dir(model, results_A, Path(project) / name_A)
-
-        # Phase B: unfreeze all, continue from best of A
-        best_A = dir_A / "weights" / "best.pt"
-        if not best_A.exists():
-            print(f"Warning: Phase A best weights not found at {best_A}, continuing with current model.")
-            model_B = model
-        else:
-            model_B = YOLO(str(best_A))
-
-        remain_epochs = max(0, epochs - args_A["epochs"]) if epochs else 0
-        if remain_epochs == 0:
-            print("Phase B skipped (no remaining epochs).")
-            return model_B, results_A, dir_A
-
-        name_B = name or f"{experiment_name or 'train'}"
-        args_B = dict(train_args)
-        args_B.update({
-            "epochs": remain_epochs,
-            "lr0": all_lr,
-            "cos_lr": cos_lr,
-            "lrf": lrf,
-            "patience": patience,
-            "mosaic": mosaic_all,
-            "mixup": mixup,
-            "close_mosaic": close_mosaic_all,
-            "name": name_B,
-        })
-        if label_smoothing > 0:
-            args_B["label_smoothing"] = label_smoothing
-        if optimizer_choice and optimizer_choice != "auto":
-            args_B["optimizer"] = optimizer_choice
-        print(f"Phase B (all layers): epochs={remain_epochs}, lr0={all_lr}")
-        results_B = model_B.train(**args_B)
-        dir_B = _resolve_save_dir(model_B, results_B, Path(project) / name_B)
-        return model_B, results_B, dir_B
+    # Two-phase path removed for simplicity; single-phase fine-tune only
 
     # Single-phase (original) path
     if finetune_mode:
@@ -358,6 +282,13 @@ def train_model(
             # Freeze backbone layers (layers 0-9 typically for YOLOv8)
             train_args["freeze"] = list(range(10))
             print("Freezing backbone layers for fine-tuning")
+
+        # Allow minimal, explicit overrides (optimizer, mosaic, mixup, close_mosaic, cos_lr, lrf, patience)
+        if single_phase_overrides:
+            sp = {k: v for k, v in single_phase_overrides.items() if v is not None}
+            if sp:
+                print(f"Applying single-phase overrides: {sorted(sp.keys())}")
+                train_args.update(sp)
 
     results = model.train(**train_args)
 
@@ -575,23 +506,7 @@ def run_train_eval_stage(args):
         finetune_lr = train_params.get("finetune_lr", None)
         finetune_epochs = train_params.get("finetune_epochs", None)
         freeze_backbone = train_params.get("freeze_backbone", False)
-        two_phase_cfg = {
-            "enabled": bool(train_params.get("two_phase_finetune", False)),
-            "ft_freeze_layers": train_params.get("ft_freeze_layers", 10),
-            "ft_head_epochs": train_params.get("ft_head_epochs", 10),
-            "ft_head_lr": train_params.get("ft_head_lr", 0.002),
-            "ft_all_lr": train_params.get("ft_all_lr", 0.0005),
-            "cos_lr": train_params.get("cos_lr", True),
-            "lrf": train_params.get("lrf", 0.05),
-            "patience": train_params.get("patience", 25),
-            "mosaic_head": train_params.get("mosaic_head", 0.5),
-            "mosaic_all": train_params.get("mosaic_all", 0.25),
-            "mixup": train_params.get("mixup", 0.0),
-            "close_mosaic_head": train_params.get("close_mosaic_head", 5),
-            "close_mosaic_all": train_params.get("close_mosaic_all", 5),
-            "label_smoothing": train_params.get("label_smoothing", 0.0),
-            "optimizer": train_params.get("optimizer", None),
-        }
+        # Two-phase config removed; keep a few single-phase knobs below
         baseline_weights_path = evaluation_params.get("baseline_weights_path")
         # Use fine-tuning epochs if in fine-tuning mode and specified
         if finetune_mode and finetune_epochs is not None:
@@ -604,12 +519,37 @@ def run_train_eval_stage(args):
         finetune_lr = None
         freeze_backbone = False
         baseline_weights_path = None
+        params = {}
+        train_params = {}
 
     # Define paths
     dataset_name = Path(args.dataset_name)
     dataset_path = Path("datasets") / dataset_name
     training_path = dataset_path / "train"
     test_path = dataset_path / "test"
+
+    # Prepare minimal single-phase overrides (only applied when two-phase is disabled)
+    single_phase_overrides = None
+    if finetune_mode:
+        # Support a small set of safe knobs for one-step FT to avoid optimizer=auto overrides
+        single_phase_overrides = {}
+        opt = train_params.get("optimizer", None)
+        if opt and opt != "auto":
+            single_phase_overrides["optimizer"] = opt
+        # Allow optional augmentation/schedule overrides using existing keys if present
+        for key_param, key_yolo in (
+            ("mosaic", "mosaic"),
+            ("close_mosaic", "close_mosaic"),
+            ("mixup", "mixup"),
+            ("cos_lr", "cos_lr"),
+            ("lrf", "lrf"),
+            ("patience", "patience"),
+        ):
+            v = train_params.get(key_param, None)
+            if v is not None:
+                single_phase_overrides[key_yolo] = v
+        if not single_phase_overrides:
+            single_phase_overrides = None
 
     # Train the model
     model, results, train_output_dir = train_model(
@@ -623,7 +563,7 @@ def run_train_eval_stage(args):
         pretrained_model_path=pretrained_model_path,
         finetune_lr=finetune_lr,
         freeze_backbone=freeze_backbone,
-        two_phase_cfg=two_phase_cfg if finetune_mode else None,
+        single_phase_overrides=single_phase_overrides,
     )
 
     # Determine the final experiment display name (append suffix in finetune mode)

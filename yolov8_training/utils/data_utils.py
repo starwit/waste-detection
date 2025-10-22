@@ -499,7 +499,27 @@ def _dedupe_pairs(
         if cross_clusters:
             print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
             detector.print_duplicate_clusters(cross_clusters)
-            cross_unique_images = set(detector.get_unique_images(all_unique_images))
+            # Prefer keeping images from oversampled folders (e.g., new week, replay)
+            # If none in the cluster, fall back to lexicographic first (as detector.get_unique_images)
+            scene_by_path: Dict[Path, str] = {}
+            for scene_name, folder_pairs in folder_groups.items():
+                for img_path, _lbl, _scene in folder_pairs:
+                    scene_by_path[img_path] = scene_name
+
+            cross_keep: Set[Path] = set()
+            for _root, imgs in cross_clusters.items():
+                # rank candidates: replay > any oversampled scene > lexicographic
+                def rank(p: Path) -> tuple[int, int, str]:
+                    scene = scene_by_path.get(p, "")
+                    is_replay = 1 if scene == "replay" or "/replay/" in str(p) else 0
+                    is_oversampled = 1 if scene in oversampled_folders else 0
+                    return (-is_replay, -is_oversampled, str(p))
+
+                keep = sorted(imgs, key=rank)[0]
+                cross_keep.add(keep)
+            # Also keep all images that were not in any duplicate cluster
+            in_any_cluster = {p for imgs in cross_clusters.values() for p in imgs}
+            cross_unique_images = set(p for p in all_unique_images if p not in in_any_cluster) | cross_keep
             processed_pairs = [
                 ImageLabelPair(img_path, lbl_path, scene_name)
                 for img_path, lbl_path, scene_name in processed_pairs
