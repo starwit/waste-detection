@@ -6,25 +6,25 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: ba4160f8fba6b8c275365148bacf86c1.dir
-      size: 3513045872
-      nfiles: 14239
+      md5: 20d6993ead63ad4a3164b293e62e46d1.dir
+      size: 4798723457
+      nfiles: 16368
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 1e955ca9c96382ad32b3def8bd3dd165
-      size: 17767
+      md5: d5031c89702f360c1f1977df0f61f9b9
+      size: 31418
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 737b5ab887069ec8054007aad305f195
-      size: 36874
+      md5: 38a368a473e8988316458217193908c5
+      size: 36468
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: a01d85b2dde81ae0e06f2268083fea69
-      size: 8136
+      md5: f62195cfe2b869f50bc9ef17cd3a7773
+      size: 8320
     params:
       params.yaml:
         data:
@@ -38,45 +38,62 @@ stages:
           val_split: 0.1
           test_split: 0.1
           augment_multiplier: 1
+          auto_replay:
+            enabled: true
+            max_new: 200
+            max_total: 400
+            iou_thr: 0.5
+            conf_thr: 0.25
+            border_conf: 0.35
+            include_empty: true
+            seed: 42
+            dest: raw_data/train/replay
           folder_subsets:
-            uavvaste: 0.5
-            taco: 0.3
-            cw32-08-07-train: 2.0
+            cw36-auto-mined: 2.0
+            replay: 2.0
+            cw33: 200
+            cw32-08-07-train: 200
+            taco: 100
+            uavvaste: 200
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: a54355a4ef831aeee972166e3d52c972.dir
-      size: 1936376195
-      nfiles: 5120
+      md5: 7c662b5e5903d5d89d33c5472e5c430b.dir
+      size: 2646504181
+      nfiles: 3664
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: d048604be0b5e6d20f4824c675921c6f.dir
-      size: 1937187377
-      nfiles: 5123
-    - path: taco-uav-model.pt
+      md5: 4e6f4e1be3a461974eb6d8c351255a25.dir
+      size: 2647067171
+      nfiles: 3667
+    - path: models/current_best/best.pt
       hash: md5
-      md5: 34a611d68a32a111b0a012a7428aaddc
+      md5: c2ced17998066eb9765c5ba587d7d4c7
+      size: 52186507
+    - path: models/current_best/best.pt
+      hash: md5
+      md5: c2ced17998066eb9765c5ba587d7d4c7
       size: 52186507
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: 1e955ca9c96382ad32b3def8bd3dd165
-      size: 17767
+      md5: d5031c89702f360c1f1977df0f61f9b9
+      size: 31418
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: 737b5ab887069ec8054007aad305f195
-      size: 36874
+      md5: 38a368a473e8988316458217193908c5
+      size: 36468
     - path: yolov8_training/utils/evaluate.py
       hash: md5
-      md5: d7de9a5b7fca7316044c300cbe219ff4
-      size: 27212
+      md5: 46be88fba6d64b3c33f1faa46632505b
+      size: 26976
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
-      md5: a01d85b2dde81ae0e06f2268083fea69
-      size: 8136
+      md5: f62195cfe2b869f50bc9ef17cd3a7773
+      size: 8320
     params:
       params.yaml:
         data:
@@ -86,29 +103,46 @@ stages:
           - waste
           - cigarette
           use_coco_classes: false
+        evaluation.baseline_weights_path: models/current_best/best.pt
         prepare.val_split: 0.1
         train:
           model_size: m
           image_size: 1280
           epochs: 50
           batch_size: 8
-          finetune_mode: false
-          pretrained_model_path: taco-uav-model.pt
+          finetune_mode: true
+          pretrained_model_path: models/current_best/best.pt
           finetune_lr: 0.0001
           finetune_epochs: 60
           freeze_backbone: false
+          two_phase_finetune: true
+          ft_freeze_layers: 10
+          ft_head_epochs: 10
+          ft_head_lr: 0.002
+          ft_all_lr: 0.0005
+          cos_lr: true
+          lrf: 0.05
+          patience: 25
+          mosaic_head: 0.5
+          mosaic_all: 0.1
+          mixup: 0.0
+          close_mosaic_head: 5
+          close_mosaic_all: 5
+          image_weights: true
+          label_smoothing: 0.0
+          optimizer: AdamW
     outs:
     - path: metrics.json
       hash: md5
-      md5: d61af0b8feec43999cf9d9047e5fe6d5
-      size: 395
+      md5: 7a38d74920dd0532d12abe85aa33fcdb
+      size: 457
     - path: results_comparison/
       hash: md5
-      md5: f3904d8d5bea8d08718325f5f246abfc.dir
-      size: 2031
+      md5: dceae469711b018f787b705091735793.dir
+      size: 2204
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 50d51bccccef7360b53c5060ea1dbd2c.dir
-      size: 400574540
-      nfiles: 119
+      md5: 813591fb97575e049a0ed3b78e161b8b.dir
+      size: 705259643
+      nfiles: 214
