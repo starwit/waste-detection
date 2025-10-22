@@ -32,10 +32,10 @@ prepare:
     # Example: use only 30% of images from taco folder
     taco: 0.02
     # Example: oversample a folder - use 200% means each image appears twice
-    cw32-08-07-train: 0.3
-    cw33: 0.3
-    cw36-auto-mined: 2.0
-    replay: 1.0
+    cw32-08-07-train: 1
+    cw33: 1
+    cw36-auto-mined: 1.5
+    replay: 1.5
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
@@ -45,9 +45,9 @@ train:
   # Fine-tuning configuration
   finetune_mode: true  # Set to true to enable fine-tuning
   pretrained_model_path: models/current_best/best.pt    # Path to pre-trained model
-  finetune_lr: 0.0008   # Suggested LR when fine-tuning with unfrozen backbone
-  finetune_epochs: 40   # Override total epochs during fine-tuning
-  freeze_backbone: false
+  finetune_lr: 0.0012   # Suggested LR when fine-tuning with unfrozen backbone
+  finetune_epochs: 30   # Override total epochs during fine-tuning
+  freeze_backbone: true
   optimizer: AdamW      # Prevent optimizer=auto from overriding lr0
   mosaic: 0.15          # Gentle augmentations during fine-tuning
   close_mosaic: 5

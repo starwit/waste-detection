@@ -51,25 +51,25 @@ stages:
           folder_subsets:
             uavvaste: 0.1
             taco: 0.02
-            cw32-08-07-train: 0.3
-            cw33: 0.3
-            cw36-auto-mined: 2.0
-            replay: 1.0
+            cw32-08-07-train: 1
+            cw33: 1
+            cw36-auto-mined: 1.5
+            replay: 1.5
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: edbf44517d102546368f844c32f291b7.dir
-      size: 1826522369
-      nfiles: 2860
+      md5: 33cc6a470593e67e7a1b5a6782f58cbc.dir
+      size: 2246517728
+      nfiles: 3666
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: f5c338992b8a431fe52a0c2d0ccc1ee4.dir
-      size: 1826962291
-      nfiles: 2863
+      md5: 4900b55226e6f493ffa5b88fb0c67ba8.dir
+      size: 2247073632
+      nfiles: 3669
     - path: models/current_best/best.pt
       hash: md5
       md5: c2ced17998066eb9765c5ba587d7d4c7
@@ -112,9 +112,9 @@ stages:
           batch_size: 8
           finetune_mode: true
           pretrained_model_path: models/current_best/best.pt
-          finetune_lr: 0.0008
-          finetune_epochs: 40
-          freeze_backbone: false
+          finetune_lr: 0.0012
+          finetune_epochs: 30
+          freeze_backbone: true
           optimizer: AdamW
           mosaic: 0.15
           close_mosaic: 5
@@ -125,15 +125,15 @@ stages:
     outs:
     - path: metrics.json
       hash: md5
-      md5: 7834885370ba55a48a08190e5d92bc5d
-      size: 453
+      md5: 54dbc9daea6b362d07495d75cc08b6d3
+      size: 455
     - path: results_comparison/
       hash: md5
-      md5: daf24a463550e7e7ea9ff48bfcaa8b07.dir
-      size: 2169
+      md5: 030929bb53cb39da31f345964420d7e2.dir
+      size: 2269
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 1aee4695123866ff07177a6071517508.dir
-      size: 594777925
-      nfiles: 190
+      md5: 66ea0b6a012f2ca474a429d48177ee81.dir
+      size: 595780679
+      nfiles: 193
