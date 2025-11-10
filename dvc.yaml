@@ -40,6 +40,8 @@ stages:
       - yolov8_training/utils/data_utils.py
       - yolov8_training/utils/find_duplicates.py
       - datasets/${data.dataset_name}
+      # Track configured baseline paths for DVC change detection
+      # Stub files (0-byte) satisfy DVC deps but are rejected by training code
       - ${train.pretrained_model_path}
       - ${evaluation.baseline_weights_path}
     outs:

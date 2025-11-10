@@ -22,6 +22,67 @@ from yolov8_training.utils.evaluate import (
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
 
+def _ensure_default_baseline_stub() -> None:
+    """
+    Create stub files for DEFAULT baseline paths, or error on missing CUSTOM paths.
+    
+    WHY THIS EXISTS:
+    - DVC requires all dependencies to exist before running pipelines
+    - On fresh clones, baseline weights don't exist yet
+    - Creating stubs for DEFAULT paths lets fresh clones work
+    - Erroring on CUSTOM paths catches configuration mistakes early
+    
+    BEHAVIOR:
+    - Default path missing → Create 0-byte stub (satisfies DVC, rejected by training)
+    - Custom path missing → Raise clear error (user misconfigured)
+    - Any path exists → Skip (already valid)
+    
+    THE STUB IS NEVER USED FOR TRAINING:
+    - All baseline loading functions check: file.stat().st_size > 0
+    - 0-byte files are rejected, triggering fallback to COCO baseline
+    - See _load_baseline_from_path() for the size check
+    """
+    DEFAULT_BASELINE_PATH = "models/current_best/best.pt"
+    
+    try:
+        params = _load_params_yaml()
+    except Exception:
+        params = {}
+
+    paths_to_check = [
+        ("train.pretrained_model_path", params.get("train", {}).get("pretrained_model_path")),
+        ("evaluation.baseline_weights_path", params.get("evaluation", {}).get("baseline_weights_path")),
+    ]
+
+    for param_name, path_str in paths_to_check:
+        if not path_str:
+            continue
+            
+        candidate = Path(path_str)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+
+        # Skip if file already exists
+        if candidate.exists():
+            continue
+
+        # Normalize paths for comparison
+        is_default = str(Path(path_str)).replace("\\", "/") == DEFAULT_BASELINE_PATH
+        
+        if is_default:
+            # Create stub for default path (fresh clone scenario)
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.touch()
+            print(f"Created stub file for {param_name}: {candidate}")
+        else:
+            # Custom path doesn't exist - create stub with warning
+            # This allows fine-tune mode to work even when baseline doesn't exist yet
+            print(f"Warning: {param_name} = '{path_str}' does not exist")
+            print(f"Creating stub file. Training will fall back to COCO baseline.")
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.touch()
+
+
 def _load_params_yaml():
     """Load and return params from params.yaml as a dict, or {} on failure."""
     try:
@@ -77,7 +138,22 @@ def _resolve_save_dir(model, results, default: Path) -> Path:
 
 
 def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
-    """Return YOLO model and display name loaded from the given path if it exists."""
+    """
+    Load YOLO baseline model from a path if it exists and is valid.
+    
+    Args:
+        path_candidate: Path to a .pt weights file (can be relative or absolute)
+    
+    Returns:
+        (model, display_name) if successful, (None, None) otherwise
+    
+    IMPORTANT SIZE CHECK:
+        The check `st_size == 0` is critical for handling stub files created by
+        _ensure_default_baseline_stub(). These 0-byte placeholder files satisfy
+        DVC's dependency tracking but should never be used for actual training.
+        
+        This ensures graceful fallback to COCO baseline on fresh clones.
+    """
     if not path_candidate:
         return None, None
 
@@ -85,7 +161,8 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
     if not candidate_path.is_absolute():
         candidate_path = Path.cwd() / candidate_path
 
-    if not candidate_path.exists():
+    # Check exists AND size > 0 to reject stub files
+    if not candidate_path.exists() or candidate_path.stat().st_size == 0:
         print(f"Warning: Baseline weights not found at {candidate_path}")
         return None, None
 
@@ -136,17 +213,32 @@ def train_model(
         Path: Directory path of the training output.
     """
     # Choose model based on fine-tuning mode
-    if finetune_mode and pretrained_model_path and Path(pretrained_model_path).exists():
+    pretrained_model = None
+    if pretrained_model_path:
+        candidate = Path(pretrained_model_path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        if candidate.exists() and candidate.stat().st_size > 0:
+            pretrained_model = candidate
+
+    if finetune_mode and pretrained_model is not None:
         print(f"Fine-tuning mode enabled. Loading pre-trained model: {pretrained_model_path}")
-        model = YOLO(pretrained_model_path)
-        
-        # Update experiment name to indicate fine-tuning
+        model = YOLO(str(pretrained_model))
         experiment_name = f"{experiment_name}-finetune"
     else:
-        if finetune_mode:
+        if finetune_mode and pretrained_model_path:
             print(f"Warning: Fine-tuning mode enabled but pre-trained model not found at {pretrained_model_path}")
             print("Falling back to training from scratch with YOLO checkpoint")
-        model = YOLO(f"yolov8{model_size}.pt")
+        checkpoint_name = f"yolov8{model_size}.pt"
+        try:
+            model = YOLO(checkpoint_name)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to initialize training without local weights. "
+                f"Tried to load official checkpoint '{checkpoint_name}' but it could not be "
+                "downloaded or loaded. Ensure network access or provide a valid "
+                "train.pretrained_model_path in params.yaml."
+            ) from e
     
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -381,6 +473,8 @@ def run_prepare_stage(args):
 
     # Print results
     detector.print_folder_comparison_results(matches)
+
+    _ensure_default_baseline_stub()
     return
 
 def run_train_eval_stage(args):
@@ -453,7 +547,19 @@ def run_train_eval_stage(args):
     # 3) Final fallback: COCO checkpoint matching the requested model size
     if baseline_model is None:
         baseline_checkpoint = f"yolov8{model_size}.pt"
-        baseline_model = YOLO(baseline_checkpoint)
+        print(f"\n{'='*70}")
+        print(f"No custom baseline model found.")
+        print(f"Using official YOLOv8 COCO checkpoint: {baseline_checkpoint}")
+        print(f"{'='*70}\n")
+        try:
+            baseline_model = YOLO(baseline_checkpoint)
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to load a baseline model. No local baseline weights were found "
+                "and loading the official YOLO checkpoint also failed. "
+                f"Attempted checkpoint: '{baseline_checkpoint}'. Ensure network access or set "
+                "evaluation.baseline_weights_path to a valid local file."
+            ) from e
         baseline_display_name = f"yolov8{model_size}-coco"
 
     # Evaluate and log results for the baseline model
@@ -495,6 +601,26 @@ def run_train_eval_stage(args):
     )
 
     delete_unused_folders()
+    
+    # Print guidance for exporting baseline
+    _print_export_guidance(train_output_dir, final_experiment_name)
+
+
+def _print_export_guidance(train_output_dir: Path, experiment_name: str) -> None:
+    """
+    Print helpful guidance for exporting the trained model as the new baseline.
+    """
+    print("\n" + "=" * 70)
+    print("Training complete! Next steps:")
+    print("=" * 70)
+    print("\nTo make this run the baseline for future comparisons:\n")
+    print(f"  python yolov8_training/utils/export_baseline.py --run-dir {train_output_dir}")
+    print("\nThen track it with DVC:\n")
+    print("  dvc add models/current_best/best.pt models/current_best/metadata.yaml")
+    print("  dvc push")
+    print("  git add models/current_best/best.pt.dvc models/current_best/metadata.yaml.dvc")
+    print(f"  git commit -m \"Update baseline to {experiment_name}\"")
+    print("\n" + "=" * 70 + "\n")
 
 def main(args):
     """
