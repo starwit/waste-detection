@@ -6,21 +6,21 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: f0b740b4127f3dc7e2f42da9f9573619.dir
+      md5: 90985289baff737ab45b5f74473e2386.dir
       size: 6611747396
       nfiles: 18131
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: d89bb2f1502658172d4ab883cddaf77c
-      size: 28511
+      md5: fd9f0052f783aa00c0ac232308ae71f6
+      size: 28967
     - path: yolov8_training/utils/augmentation.py
       hash: md5
       md5: 826b20908fb2b4eff6d467df5e22b5b9
       size: 4364
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: b50eee35ce35a284f5c4932973babae3
-      size: 37677
+      md5: 6917a401ffd1ac0038418652f8f25d3f
+      size: 43220
     - path: yolov8_training/utils/find_duplicates.py
       hash: md5
       md5: f62195cfe2b869f50bc9ef17cd3a7773
@@ -34,6 +34,10 @@ stages:
           - waste
           - cigarette
           use_coco_classes: false
+          class_mapping:
+            waste:
+            - waste
+            - cigarette
         prepare:
           val_split: 0.1
           test_split: 0.1
@@ -59,8 +63,8 @@ stages:
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 5a5459f396742fb797c9ec8b9cdcf5f4.dir
-      size: 3195572824
+      md5: 7e884a821f20f266c5419f52076495ee.dir
+      size: 3195572794
       nfiles: 5444
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
@@ -68,8 +72,8 @@ stages:
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: 49866d47279229da6ae65b3a3607a165.dir
-      size: 3196367593
+      md5: 3bccc0b79cb693f51508454117d5a627.dir
+      size: 3196367563
       nfiles: 5447
     - path: models/current_best/best.pt
       hash: md5
@@ -130,15 +134,15 @@ stages:
     outs:
     - path: metrics.json
       hash: md5
-      md5: fcc5da9bfdb2d4e8a7b4c06831052b29
+      md5: fe871f619252f71930e1b2f69af98c94
       size: 456
     - path: results_comparison/
       hash: md5
-      md5: 9756cb0e0a9194e7538692871d593540.dir
-      size: 2434
+      md5: 21b92762e4fb8aae0cd8784095993191.dir
+      size: 2484
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 66d7bbb128821a37d21a87dd2aa47d0f.dir
-      size: 595809052
+      md5: 3917229986de15a065750f3615427ec6.dir
+      size: 595536944
       nfiles: 193
