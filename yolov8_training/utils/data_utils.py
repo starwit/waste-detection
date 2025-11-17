@@ -127,6 +127,55 @@ def get_class_mapping(custom_classes=None, use_coco_classes=True):
         return {}
 
 
+def apply_class_mapping_config(custom_classes, class_mapping_config):
+    """
+    Apply class mapping configuration to merge classes together.
+    
+    This function takes the original custom_classes list and a mapping configuration,
+    then returns a new class list where source classes are mapped to target classes.
+    
+    Args:
+        custom_classes (list): Original list of class names
+        class_mapping_config (dict): Mapping of target_class -> [source_classes]
+                                     Example: {"waste": ["waste", "cigarette"]}
+    
+    Returns:
+        tuple: (mapped_classes, source_to_target_map)
+            - mapped_classes: List of unique target class names
+            - source_to_target_map: Dict mapping source class name -> target class name
+    """
+    if not class_mapping_config or not custom_classes:
+        return custom_classes, {}
+    
+    # Build source -> target mapping
+    source_to_target = {}
+    for target_class, source_classes in class_mapping_config.items():
+        if isinstance(source_classes, list):
+            for source_class in source_classes:
+                source_to_target[source_class] = target_class
+        else:
+            # Handle case where a single string is provided instead of a list
+            source_to_target[source_classes] = target_class
+    
+    # Build the mapped class list (only unique target classes)
+    mapped_classes = []
+    seen_targets = set()
+    
+    for original_class in custom_classes:
+        # Map to target class if mapping exists, otherwise keep original
+        target_class = source_to_target.get(original_class, original_class)
+        if target_class not in seen_targets:
+            mapped_classes.append(target_class)
+            seen_targets.add(target_class)
+    
+    print(f"\nClass mapping applied:")
+    print(f"  Original classes: {custom_classes}")
+    print(f"  Mapped classes: {mapped_classes}")
+    print(f"  Mapping rules: {source_to_target}")
+    
+    return mapped_classes, source_to_target
+
+
 def map_class_names_to_ids(class_names, target_mapping):
     """
     Map class names to target class IDs.
@@ -159,6 +208,63 @@ def map_class_names_to_ids(class_names, target_mapping):
             print(f"Warning: No mapping found for class '{source_name}' (ID: {source_id})")
     
     return mapping
+
+
+def remap_labels_with_class_mapping(label_path: Path, source_to_target_map: dict, 
+                                    original_class_list: list, final_class_list: list) -> None:
+    """
+    Remap class IDs in label files based on class mapping configuration.
+    
+    This function reads YOLO format labels and remaps class IDs when classes are merged.
+    For example, if 'cigarette' (class 1) is mapped to 'waste' (class 0), all labels
+    with class ID 1 will be changed to class ID 0.
+    
+    Args:
+        label_path: Path to the label file
+        source_to_target_map: Dict mapping source class name -> target class name
+        original_class_list: Original list of class names (to map IDs to names)
+        final_class_list: Final list of class names after mapping (to get target IDs)
+    """
+    if not label_path.exists() or label_path.stat().st_size == 0:
+        return
+    
+    # Build ID mappings
+    # original_class_list has the classes in order: [waste, cigarette]
+    # final_class_list has the unique target classes: [waste]
+    
+    # Map: source_class_id -> target_class_id
+    id_mapping = {}
+    for source_id, source_class_name in enumerate(original_class_list):
+        target_class_name = source_to_target_map.get(source_class_name, source_class_name)
+        if target_class_name in final_class_list:
+            target_id = final_class_list.index(target_class_name)
+            id_mapping[source_id] = target_id
+    
+    # Read and remap labels
+    with open(label_path, 'r') as f:
+        lines = f.readlines()
+    
+    remapped_lines = []
+    modified = False
+    
+    for line in lines:
+        parts = line.strip().split()
+        if not parts:
+            continue
+        
+        original_class_id = int(parts[0])
+        if original_class_id in id_mapping:
+            new_class_id = id_mapping[original_class_id]
+            if new_class_id != original_class_id:
+                modified = True
+            parts[0] = str(new_class_id)
+        
+        remapped_lines.append(' '.join(parts) + '\n')
+    
+    # Only write if something changed
+    if modified:
+        with open(label_path, 'w') as f:
+            f.writelines(remapped_lines)
 
 
 def sorted_iterdir(path):
@@ -571,7 +677,7 @@ def _oversample_train_pairs(
     return extended_pairs
 
 
-def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True):
+def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True, class_mapping_config=None):
     """
     Create dataset.yaml file with appropriate class mapping.
     
@@ -579,9 +685,14 @@ def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classe
         dataset_path: Path to the dataset directory
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
+        class_mapping_config: Dictionary mapping target classes to source classes for merging
     """
-
-    class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+    # Apply class mapping if configured
+    final_classes = custom_classes
+    if class_mapping_config and custom_classes:
+        final_classes, _ = apply_class_mapping_config(custom_classes, class_mapping_config)
+    
+    class_mapping = get_class_mapping(final_classes, use_coco_classes)
 
     # Get all parts of the path
     yaml_dataset_path = dataset_path.absolute()
@@ -795,6 +906,7 @@ def process_single_images(
     custom_classes=None,
     use_coco_classes=True,
     folder_subsets=None,
+    class_mapping_config=None,
 ):
     """
     Process single images and their labels, splitting them into train/val/test sets.
@@ -810,6 +922,7 @@ def process_single_images(
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
         folder_subsets: Dictionary mapping folder names to subset ratios (0.0-1.0)
+        class_mapping_config: Dictionary mapping target classes to source classes for merging
     """
     if folder_subsets is None:
         folder_subsets = {}
@@ -848,6 +961,18 @@ def process_single_images(
     
     # Get target class mapping for remapping
     target_class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+    
+    # Apply class mapping if configured
+    original_class_list = custom_classes if custom_classes else []
+    final_class_list = custom_classes if custom_classes else []
+    source_to_target_map = {}
+    
+    if class_mapping_config and custom_classes:
+        final_class_list, source_to_target_map = apply_class_mapping_config(
+            custom_classes, class_mapping_config
+        )
+        print(f"\nClass mapping will be applied to all label files.")
+        print(f"  Source-to-target mapping: {source_to_target_map}")
 
     for some_folder in sorted_iterdir(input_path):
         if not some_folder.is_dir():
@@ -965,6 +1090,15 @@ def process_single_images(
 
             link_or_copy(img_file, target_img)
             link_or_copy(label_file, target_label)
+            
+            # Apply class mapping to the copied label file if configured
+            if source_to_target_map:
+                remap_labels_with_class_mapping(
+                    target_label, 
+                    source_to_target_map, 
+                    original_class_list, 
+                    final_class_list
+                )
 
             count += 1
         return count

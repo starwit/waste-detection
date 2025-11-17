@@ -94,18 +94,19 @@ def _load_params_yaml():
         return {}
 
 def load_class_config(params: dict | None = None):
-    """Load class configuration from params.yaml"""
+    """Load class configuration from params.yaml including class mapping"""
     if params is None:
         params = _load_params_yaml()
 
     custom_classes = params.get("data", {}).get("custom_classes", [])
     use_coco_classes = params.get("data", {}).get("use_coco_classes", True)
+    class_mapping_config = params.get("data", {}).get("class_mapping", {})
 
     # Filter out None/empty values from custom_classes
     if custom_classes:
         custom_classes = [cls for cls in custom_classes if cls]
 
-    return custom_classes, use_coco_classes
+    return custom_classes, use_coco_classes, class_mapping_config
 
 def load_folder_subset_config(params: dict | None = None):
     """Load folder subset configuration from params.yaml"""
@@ -308,7 +309,8 @@ def process_data(
     augment_multiplier,
     custom_classes=None,
     use_coco_classes=True,
-    folder_subsets=None
+    folder_subsets=None,
+    class_mapping_config=None
 ):
     """
     Process image data for training and validation.
@@ -323,6 +325,7 @@ def process_data(
         custom_classes (list): List of custom class names.
         use_coco_classes (bool): Whether to use COCO classes when custom_classes is empty.
         folder_subsets (dict): Dictionary mapping folder names to subset ratios (0.0-1.0).
+        class_mapping_config (dict): Dictionary mapping target classes to source classes for merging.
 
     Returns:
         int, int, int: Total frames for training, validation and test.
@@ -330,7 +333,7 @@ def process_data(
     if image_input_path.exists():
         return process_single_images(
             image_input_path, train_output_path, test_output_path, val_split, test_split, 
-            augment_multiplier, custom_classes, use_coco_classes, folder_subsets
+            augment_multiplier, custom_classes, use_coco_classes, folder_subsets, class_mapping_config
         )
     return 0, 0, 0
 
@@ -358,7 +361,7 @@ def run_prepare_stage(args):
     # Load params once to avoid multiple file reads
     _params = _load_params_yaml()
     # Load class configuration
-    custom_classes, use_coco_classes = load_class_config(_params)
+    custom_classes, use_coco_classes, class_mapping_config = load_class_config(_params)
     # Load folder subset configuration
     folder_subsets = load_folder_subset_config(_params)
     
@@ -447,10 +450,11 @@ def run_prepare_stage(args):
             augment_multiplier=augment_multiplier,
             custom_classes=custom_classes,
             use_coco_classes=use_coco_classes,
-            folder_subsets=folder_subsets
+            folder_subsets=folder_subsets,
+            class_mapping_config=class_mapping_config
         )
 
-        create_dataset_yaml(training_path, custom_classes, use_coco_classes)
+        create_dataset_yaml(training_path, custom_classes, use_coco_classes, class_mapping_config)
 
         test_folder_frame_count = 0
         if test_data_exists:
@@ -464,10 +468,11 @@ def run_prepare_stage(args):
                 augment_multiplier=1,
                 custom_classes=custom_classes,
                 use_coco_classes=use_coco_classes,
-                folder_subsets={}  # Don't apply subsets to test data
+                folder_subsets={},  # Don't apply subsets to test data
+                class_mapping_config=class_mapping_config
             )
 
-        create_dataset_yaml(test_path, custom_classes, use_coco_classes)
+        create_dataset_yaml(test_path, custom_classes, use_coco_classes, class_mapping_config)
 
         print(f"Total training frames: {total_train_frames}")
         print(f"Total validation frames: {total_val_frames}")

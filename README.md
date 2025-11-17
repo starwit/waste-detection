@@ -20,10 +20,11 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 3. [Managing Project Data](#managing-project-data)
 4. [Experiment Workflow](#experiment-workflow)
 5. [Custom Classes](#custom-classes)
-6. [Raw Data Structure](#raw-data-structure)
-7. [Fine-tuning](#fine-tuning)
-8. [Folder Subsets](#folder-subsets)
-9. [Testing](#testing)
+6. [Class Mapping](#class-mapping)
+7. [Raw Data Structure](#raw-data-structure)
+8. [Fine-tuning](#fine-tuning)
+9. [Folder Subsets](#folder-subsets)
+10. [Testing](#testing)
 
 ---
 
@@ -222,6 +223,64 @@ data:
 ```
 
 To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
+
+---
+
+## Class Mapping
+
+The class mapping feature allows you to **merge multiple classes into one** during training and evaluation without modifying your raw data. This is useful for testing if combining similar classes improves detection performance.
+
+### How to Use
+
+Edit `params.yaml` to add a `class_mapping` configuration:
+
+```yaml
+data:
+  custom_classes:
+    - waste
+    - cigarette
+  use_coco_classes: false
+  
+  # Merge classes together during training
+  class_mapping:
+    waste: [waste, cigarette]  # Both will be treated as 'waste'
+```
+
+With this configuration:
+- Your raw data remains unchanged in `raw_data/`
+- During dataset preparation, labels are automatically remapped
+- The model trains with only 1 class: `waste`
+- All cigarette detections are treated as waste detections
+
+### Example: Testing Class Merging
+
+To test if merging `waste` and `cigarette` improves cigarette detection:
+
+1. Add the mapping to `params.yaml` as shown above
+2. Run the pipeline: `dvc repro` or `dvc exp run -n "merged-classes"`
+3. Compare results with your baseline (separate classes)
+4. Keep the mapping if results improve, otherwise revert it
+
+### More Examples
+
+**Multiple merge groups:**
+```yaml
+class_mapping:
+  recyclable: [plastic_bottle, glass_bottle, aluminum_can]
+  organic: [food_waste, paper]
+```
+
+**Partial mapping (keep some classes separate):**
+```yaml
+custom_classes: [waste, cigarette, person]
+class_mapping:
+  waste: [waste, cigarette]
+  # person remains separate
+```
+
+For detailed documentation, see [`docs/CLASS_MAPPING.md`](docs/CLASS_MAPPING.md).
+
+> **Note:** When importing datasets, the pipeline also automatically maps classes from source `data.yaml` files to your configured classes based on name matching.
 
 ---
 
