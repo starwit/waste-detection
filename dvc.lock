@@ -6,9 +6,9 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: 4bba90713f5b94ddeee530e4c3ce6138.dir
-      size: 4991782754
-      nfiles: 16712
+      md5: f0b740b4127f3dc7e2f42da9f9573619.dir
+      size: 6611747396
+      nfiles: 18131
     - path: yolov8_training/train_pipeline.py
       hash: md5
       md5: d89bb2f1502658172d4ab883cddaf77c
@@ -53,39 +53,40 @@ stages:
             taco: 0.02
             cw32-08-07-train: 1
             cw33: 1
-            cw36-auto-mined: 1.5
+            cw36-auto-mined: 1.0
+            cw41-auto-mined: 1.5
             replay: 1.5
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 33cc6a470593e67e7a1b5a6782f58cbc.dir
-      size: 2246517728
-      nfiles: 3666
+      md5: 5a5459f396742fb797c9ec8b9cdcf5f4.dir
+      size: 3195572824
+      nfiles: 5444
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
-      --model-size m --image-size 1280 --epochs 50 --batch-size 8 --val-split 0.1\n"
+      --model-size m --image-size 1280 --epochs 100 --batch-size 8 --val-split 0.1\n"
     deps:
     - path: datasets/waste-detection
       hash: md5
-      md5: 4900b55226e6f493ffa5b88fb0c67ba8.dir
-      size: 2247073632
-      nfiles: 3669
+      md5: 49866d47279229da6ae65b3a3607a165.dir
+      size: 3196367593
+      nfiles: 5447
     - path: models/current_best/best.pt
       hash: md5
-      md5: c2ced17998066eb9765c5ba587d7d4c7
-      size: 52186507
+      md5: caef1a9607db7c11a359dc6ac82efda0
+      size: 52184722
     - path: models/current_best/best.pt
       hash: md5
-      md5: c2ced17998066eb9765c5ba587d7d4c7
-      size: 52186507
+      md5: caef1a9607db7c11a359dc6ac82efda0
+      size: 52184722
     - path: yolov8_training/train_pipeline.py
       hash: md5
-      md5: d89bb2f1502658172d4ab883cddaf77c
-      size: 28511
+      md5: fd9f0052f783aa00c0ac232308ae71f6
+      size: 28967
     - path: yolov8_training/utils/data_utils.py
       hash: md5
-      md5: b50eee35ce35a284f5c4932973babae3
-      size: 37677
+      md5: 6917a401ffd1ac0038418652f8f25d3f
+      size: 43220
     - path: yolov8_training/utils/evaluate.py
       hash: md5
       md5: 46be88fba6d64b3c33f1faa46632505b
@@ -103,14 +104,18 @@ stages:
           - waste
           - cigarette
           use_coco_classes: false
+          class_mapping:
+            waste:
+            - waste
+            - cigarette
         evaluation.baseline_weights_path: models/current_best/best.pt
         prepare.val_split: 0.1
         train:
           model_size: m
           image_size: 1280
-          epochs: 50
+          epochs: 100
           batch_size: 8
-          finetune_mode: true
+          finetune_mode: false
           pretrained_model_path: models/current_best/best.pt
           finetune_lr: 0.0012
           finetune_epochs: 30
@@ -125,15 +130,15 @@ stages:
     outs:
     - path: metrics.json
       hash: md5
-      md5: 54dbc9daea6b362d07495d75cc08b6d3
-      size: 455
+      md5: fcc5da9bfdb2d4e8a7b4c06831052b29
+      size: 456
     - path: results_comparison/
       hash: md5
-      md5: 030929bb53cb39da31f345964420d7e2.dir
-      size: 2269
+      md5: 9756cb0e0a9194e7538692871d593540.dir
+      size: 2434
       nfiles: 2
     - path: runs
       hash: md5
-      md5: 66ea0b6a012f2ca474a429d48177ee81.dir
-      size: 595780679
+      md5: 66d7bbb128821a37d21a87dd2aa47d0f.dir
+      size: 595809052
       nfiles: 193
