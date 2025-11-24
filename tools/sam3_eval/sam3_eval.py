@@ -11,16 +11,56 @@ import numpy as np
 import torch
 import yaml
 from PIL import Image
-from transformers import Sam3Model, Sam3Processor
+import sam3
+from sam3.model_builder import build_sam3_image_model
+from sam3.model.sam3_image_processor import Sam3Processor
 from tqdm import tqdm
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
+
+# ---- SAM3 tokenizer asset ----
+BPE_FILENAME = "bpe_simple_vocab_16e6.txt.gz"
+BPE_URL = (
+    "https://github.com/facebookresearch/sam3/"
+    "raw/main/assets/bpe_simple_vocab_16e6.txt.gz"
+)
 
 
 @dataclass
 class Detection:
     box: np.ndarray  # xyxy in pixel space
     score: float
+
+
+def ensure_bpe_vocab() -> Path:
+    """
+    Ensure the SAM3 BPE vocab exists in the location expected by the library.
+
+    We place it in `<site-packages>/assets/bpe_simple_vocab_16e6.txt.gz`,
+    which matches what the internal tokenizer code looks for.
+    """
+    sam3_root = Path(sam3.__file__).resolve().parent.parent  # parent of sam3 package
+    assets_dir = sam3_root / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    bpe_path = assets_dir / BPE_FILENAME
+
+    if not bpe_path.exists():
+        print(f"[sam3-eval] BPE vocab not found at {bpe_path}, downloading...")
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(BPE_URL) as resp, open(
+                bpe_path, "wb"
+            ) as out_f:
+                out_f.write(resp.read())
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to download SAM3 BPE vocab. "
+                f"Please download it manually from:\n{BPE_URL}\n"
+                f"and place it at:\n{bpe_path}"
+            ) from e
+
+    return bpe_path
 
 
 def _infer_dataset_yaml_from_params() -> Path:
@@ -77,8 +117,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-id",
         type=str,
-        default="facebook/sam3-hiera-large",
-        help="Hugging Face model id or local path for the SAM 3 checkpoint.",
+        default="sam3-image-official",
+        help=(
+            "Label for logging only. SAM3 weights are loaded via the official "
+            "`sam3` package, not via this string."
+        ),
     )
     parser.add_argument(
         "--device",
@@ -155,7 +198,9 @@ def list_images(images_dir: Path, limit: int | None) -> List[Path]:
     return images[:limit] if limit is not None else images
 
 
-def load_ground_truth_boxes(label_path: Path, width: int, height: int) -> List[np.ndarray]:
+def load_ground_truth_boxes(
+    label_path: Path, width: int, height: int
+) -> List[np.ndarray]:
     boxes: List[np.ndarray] = []
     if not label_path.exists():
         return boxes
@@ -228,7 +273,10 @@ def evaluate_predictions(
         scores: List[float] = []
         tps: List[int] = []
         fps: List[int] = []
-        matched = {img_id: np.zeros(len(gts), dtype=bool) for img_id, gts in ground_truths.items()}
+        matched = {
+            img_id: np.zeros(len(gts), dtype=bool)
+            for img_id, gts in ground_truths.items()
+        }
 
         for image_id, dets in predictions.items():
             ordered = sorted(dets, key=lambda d: d.score, reverse=True)
@@ -272,7 +320,7 @@ def evaluate_predictions(
     map50 = aps[0] if aps else 0.0
     map50_95 = float(np.mean(aps)) if aps else 0.0
     f1 = (
-        2 * (precision_at_05 * recall_at_05) / (precision_at_05 + recall_at_05 + 1e-16)
+        2 * (precision_at_05 * recall_at_05) / (precision_at_05 + precision_at_05 + 1e-16)
     )
     fitness = 0.1 * precision_at_05 + 0.1 * recall_at_05 + 0.8 * map50
 
@@ -295,40 +343,49 @@ def xyxy_to_xywhn(box: np.ndarray, width: int, height: int) -> List[float]:
     return [x_c / width, y_c / height, w / width, h / height]
 
 
+def _get_output_field(output: dict, keys: List[str]):
+    """
+    Safely extract a field from SAM3 output without using `or` on tensors.
+
+    Returns the first non-None value for any of the given keys.
+    """
+    for k in keys:
+        if k in output:
+            v = output[k]
+            # Accept tensors/arrays/lists; explicit None check avoids bool(tensor)
+            if v is not None:
+                return v
+    return None
+
+
 def run_sam3_inference(
     processor: Sam3Processor,
-    model: Sam3Model,
     image: Image.Image,
     prompt: str,
-    device: torch.device,
     score_threshold: float,
     max_detections: int,
 ) -> Tuple[List[Detection], float]:
-    inputs = processor(text=[prompt], images=image, return_tensors="pt").to(device)
+    """
+    Run SAM3 on a single image using the official `sam3` API.
 
+    Steps:
+      * set the image
+      * apply a text prompt
+      * pull boxes + scores from the output
+      * threshold + sort + truncate
+    """
     start = time.perf_counter()
     with torch.no_grad():
-        outputs = model(**inputs)
+        state = processor.set_image(image)
+        output = processor.set_text_prompt(state=state, prompt=prompt)
     inference_time = time.perf_counter() - start
 
-    if not hasattr(processor, "post_process_instance_segmentation"):
-        raise RuntimeError("Loaded processor does not support instance segmentation post-processing.")
-
-    try:
-        processed = processor.post_process_instance_segmentation(
-            outputs=outputs, input_size=image.size, threshold=score_threshold
-        )
-    except TypeError:
-        processed = processor.post_process_instance_segmentation(
-            outputs=outputs, input_size=image.size
-        )
-
-    if not processed:
+    if output is None:
         return [], inference_time
 
-    inst = processed[0]
-    boxes = inst.get("bboxes") or inst.get("boxes") or inst.get("boxes_xyxy")
-    scores = inst.get("scores") or inst.get("confidence_scores")
+    # output["masks"], output["boxes"], output["scores"]
+    boxes = _get_output_field(output, ["boxes", "bboxes", "boxes_xyxy"])
+    scores = _get_output_field(output, ["scores", "confidence_scores"])
 
     if boxes is None or scores is None:
         return [], inference_time
@@ -340,15 +397,23 @@ def run_sam3_inference(
         scores.detach().cpu() if hasattr(scores, "detach") else scores, dtype=float
     )
 
+    # No detections: boxes shape (0, 4) or size 0
+    if boxes_np.size == 0 or scores_np.size == 0:
+        return [], inference_time
+
     if boxes_np.ndim != 2 or boxes_np.shape[1] != 4:
         raise ValueError(f"Expected boxes with shape (N, 4); got {boxes_np.shape}")
 
     order = np.argsort(-scores_np)
     detections: List[Detection] = []
-    for idx in order[:max_detections]:
-        if score_threshold and scores_np[idx] < score_threshold:
+    for idx in order:
+        score = float(scores_np[idx])
+        if score < score_threshold:
             continue
-        detections.append(Detection(box=boxes_np[idx], score=float(scores_np[idx])))
+        detections.append(Detection(box=boxes_np[idx], score=score))
+        if len(detections) >= max_detections:
+            break
+
     return detections, inference_time
 
 
@@ -390,9 +455,12 @@ def main() -> None:
     if not image_paths:
         raise RuntimeError(f"No images found in {images_dir}")
 
-    processor = Sam3Processor.from_pretrained(args.model_id)
-    model = Sam3Model.from_pretrained(args.model_id).to(device)
+    # --- SAM3: make sure tokenizer vocab exists, then build image model + processor ---
+    bpe_path = ensure_bpe_vocab()
+    model = build_sam3_image_model(bpe_path=str(bpe_path))
+    model.to(device)
     model.eval()
+    processor = Sam3Processor(model)
 
     predictions: Dict[str, List[Detection]] = {}
     ground_truths: Dict[str, List[np.ndarray]] = {}
@@ -409,10 +477,8 @@ def main() -> None:
 
         dets, elapsed = run_sam3_inference(
             processor,
-            model,
             image,
             args.prompt,
-            device,
             args.score_threshold,
             args.max_detections,
         )
@@ -427,7 +493,7 @@ def main() -> None:
 
     metrics_payload = {
         "prompt": args.prompt,
-        "model_id": args.model_id,
+        "model_id": args.model_id,  # informational only
         "dataset_yaml": str(dataset_yaml),
         "num_images": len(image_paths),
         "num_ground_truth_boxes": int(sum(len(v) for v in ground_truths.values())),
