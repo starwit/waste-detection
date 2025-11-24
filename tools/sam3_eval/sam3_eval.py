@@ -16,6 +16,21 @@ from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 from tqdm import tqdm
 
+try:
+    import cv2
+    from ultralytics import YOLO
+    from yolov8_training.utils.evaluate import (
+        get_dataset_classes,
+        mean_table,
+        validate_model,
+    )
+except Exception:  # pragma: no cover - optional YOLO comparison
+    cv2 = None
+    YOLO = None
+    get_dataset_classes = None
+    mean_table = None
+    validate_model = None
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 # ---- SAM3 tokenizer asset ----
@@ -442,6 +457,181 @@ def save_predictions(
         json.dump(serialized, f, indent=2)
 
 
+def _build_sam3_metrics_dict(
+    base_metrics: Dict[str, float],
+    avg_inference_time: float,
+    img_size: int | None,
+) -> Dict[str, float]:
+    """
+    Build a metrics dict compatible with yolov8_training.utils.evaluate.mean_table.
+    """
+    return {
+        "img_size": img_size,
+        "precision": float(base_metrics.get("precision", 0.0)),
+        "recall": float(base_metrics.get("recall", 0.0)),
+        "map": float(base_metrics.get("map", 0.0)),
+        "map50": float(base_metrics.get("map50", 0.0)),
+        "fitness": float(base_metrics.get("fitness", 0.0)),
+        "f1_score": float(base_metrics.get("f1_score", 0.0)),
+        "time": float(avg_inference_time),
+    }
+
+
+def _evaluate_current_best_and_write_csv(
+    dataset_yaml: Path,
+    sam3_metrics: Dict[str, float],
+    experiment_name: str,
+) -> None:
+    """
+    Evaluate the current_best YOLO model and append a comparison row to
+    results_comparison/results.csv using the shared mean_table().
+    """
+    if (
+        YOLO is None
+        or validate_model is None
+        or get_dataset_classes is None
+        or mean_table is None
+    ):
+        print(
+            "[sam3-eval] YOLO or evaluation utilities not available; "
+            "skipping CSV comparison against current_best."
+        )
+        return
+
+    current_best_dir = Path("models/current_best")
+    weights_path = current_best_dir / "best.pt"
+    metadata_path = current_best_dir / "metadata.yaml"
+
+    if not weights_path.exists():
+        print(
+            f"[sam3-eval] No current_best weights found at {weights_path}; "
+            "skipping CSV comparison."
+        )
+        return
+
+    metadata: Dict[str, object] = {}
+    if metadata_path.exists():
+        try:
+            with open(metadata_path, "r") as f:
+                metadata = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"[sam3-eval] Warning: failed to read {metadata_path}: {e}")
+
+    image_size = metadata.get("image_size")
+    base_experiment_name = metadata.get("experiment_name", "current_best")
+    base_display_name = f"{base_experiment_name} (current best)"
+
+    print(f"[sam3-eval] Loading current_best YOLO model from {weights_path}...")
+    base_model = YOLO(str(weights_path))
+
+    # Determine the class IDs to evaluate on
+    class_names, class_ids = get_dataset_classes(dataset_yaml)
+    # get_dataset_classes may return IDs as strings – coerce to ints if needed
+    try:
+        class_ids = [int(c) for c in class_ids]
+    except Exception:
+        pass
+
+    print("[sam3-eval] Evaluating current_best model on the same dataset...")
+    base_results = validate_model(
+        base_model,
+        data=str(dataset_yaml),
+        class_ids=class_ids or None,
+        write_json=False,
+        imgsz=image_size,
+        workers=0,
+    )
+
+    print("[sam3-eval] Writing CSV comparison to results_comparison/results.csv...")
+    mean_table(
+        base_results,
+        sam3_metrics,
+        experiment_name,
+        base_run=True,
+        base_model_name=base_display_name,
+    )
+
+
+def _draw_sam3_boxes_on_image(
+    img_path: Path,
+    detections: List[Detection],
+) -> np.ndarray | None:
+    """
+    Create an annotated image for SAM3 detections using OpenCV, similar to YOLO's plot().
+    """
+    if cv2 is None:
+        return None
+
+    img = cv2.imread(str(img_path))
+    if img is None:
+        return None
+
+    for det in detections:
+        x1, y1, x2, y2 = det.box.astype(int)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        label = f"{det.score:.2f}"
+        cv2.putText(
+            img,
+            label,
+            (x1, max(y1 - 5, 0)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+    return img
+
+
+def _generate_side_by_side_comparisons_sam3_vs_current_best(
+    base_model,
+    image_paths: List[Path],
+    predictions: Dict[str, List[Detection]],
+    output_dir: Path,
+    conf_threshold: float = 0.25,
+) -> None:
+    """
+    Generate side-by-side comparison images of current_best YOLO vs SAM3.
+    """
+    if cv2 is None:
+        print(
+            "[sam3-eval] OpenCV not available; skipping side-by-side visual comparisons."
+        )
+        return
+
+    side_by_side_dir = output_dir / "side_by_side_current_best"
+    side_by_side_dir.mkdir(exist_ok=True)
+
+    for img_path in image_paths:
+        if img_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+
+        image_id = img_path.stem
+        sam3_dets = predictions.get(image_id, [])
+
+        # YOLO current_best prediction and plot
+        base_results = base_model.predict(
+            str(img_path), conf=conf_threshold, save=False, verbose=False
+        )
+        base_img = base_results[0].plot()
+
+        # SAM3 drawing based on already computed detections
+        sam3_img = _draw_sam3_boxes_on_image(img_path, sam3_dets)
+        if sam3_img is None:
+            continue
+
+        # Resize SAM3 image to match YOLO output if needed
+        if sam3_img.shape[:2] != base_img.shape[:2]:
+            sam3_img = cv2.resize(
+                sam3_img, (base_img.shape[1], base_img.shape[0]), interpolation=cv2.INTER_LINEAR
+            )
+
+        comparison_img = np.hstack((base_img, sam3_img))
+        save_path = side_by_side_dir / f"comparison_{img_path.name}"
+        cv2.imwrite(str(save_path), comparison_img)
+
+
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
@@ -491,6 +681,8 @@ def main() -> None:
     iou_thresholds = np.arange(0.5, 0.96, 0.05)
     metrics = evaluate_predictions(predictions, ground_truths, iou_thresholds)
 
+    avg_inference_time = float(np.mean(inference_times)) if inference_times else 0.0
+
     metrics_payload = {
         "prompt": args.prompt,
         "model_id": args.model_id,  # informational only
@@ -510,7 +702,7 @@ def main() -> None:
             "map50": metrics["map50"],
             "fitness": metrics["fitness"],
             "f1_score": metrics["f1_score"],
-            "time": float(np.mean(inference_times)) if inference_times else 0.0,
+            "time": avg_inference_time,
         },
     }
 
@@ -522,6 +714,39 @@ def main() -> None:
 
     print(f"Saved metrics to {metrics_path}")
     print(f"Saved predictions to {preds_path}")
+
+    # --- Optional: CSV logging and side-by-side comparisons vs current_best YOLO ---
+    sam3_metrics_dict = _build_sam3_metrics_dict(
+        metrics, avg_inference_time=avg_inference_time, img_size=None
+    )
+    sam3_experiment_name = f"SAM3 ({args.prompt})"
+
+    try:
+        _evaluate_current_best_and_write_csv(dataset_yaml, sam3_metrics_dict, sam3_experiment_name)
+    except Exception as e:
+        print(f"[sam3-eval] Warning: failed to write CSV comparison: {e}")
+
+    if YOLO is not None and cv2 is not None:
+        current_best_dir = Path("models/current_best")
+        weights_path = current_best_dir / "best.pt"
+        if weights_path.exists():
+            try:
+                base_model = YOLO(str(weights_path))
+                _generate_side_by_side_comparisons_sam3_vs_current_best(
+                    base_model,
+                    image_paths,
+                    predictions,
+                    output_dir,
+                )
+                print(
+                    f"[sam3-eval] Saved side-by-side comparisons to "
+                    f"{output_dir / 'side_by_side_current_best'}"
+                )
+            except Exception as e:
+                print(
+                    f"[sam3-eval] Warning: failed to generate side-by-side "
+                    f"comparisons vs current_best: {e}"
+                )
 
 
 if __name__ == "__main__":
