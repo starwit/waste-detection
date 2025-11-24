@@ -23,6 +23,36 @@ class Detection:
     score: float
 
 
+def _infer_dataset_yaml_from_params() -> Path:
+    """
+    Infer the test dataset.yaml path from params.yaml so we
+    automatically match the train/eval pipeline's test split.
+    """
+    params_path = Path("params.yaml")
+    if not params_path.exists():
+        raise FileNotFoundError(
+            "params.yaml not found. Please pass --dataset explicitly."
+        )
+
+    with open(params_path, "r") as f:
+        params = yaml.safe_load(f) or {}
+
+    dataset_name = (params.get("data") or {}).get("dataset_name")
+    if not dataset_name:
+        raise RuntimeError(
+            "data.dataset_name missing in params.yaml. "
+            "Please pass --dataset explicitly."
+        )
+
+    candidate = Path("datasets") / dataset_name / "test" / "dataset.yaml"
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Inferred test dataset YAML '{candidate}' does not exist. "
+            "Run the prepare stage or pass --dataset explicitly."
+        )
+    return candidate
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run SAM 3 on the test set and score detections like the YOLO evaluator.",
@@ -31,8 +61,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=Path,
-        default=Path("datasets/waste-detection/test/dataset.yaml"),
-        help="Path to dataset.yaml describing the test split.",
+        default=None,
+        help=(
+            "Path to dataset.yaml describing the test split. "
+            "If omitted, uses datasets/<data.dataset_name>/test/dataset.yaml "
+            "from params.yaml."
+        ),
     )
     parser.add_argument(
         "--prompt",
@@ -350,7 +384,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     preds_path = args.save_predictions or (output_dir / "predictions.json")
 
-    images_dir, labels_dir = load_dataset_paths(args.dataset)
+    dataset_yaml = args.dataset or _infer_dataset_yaml_from_params()
+    images_dir, labels_dir = load_dataset_paths(dataset_yaml)
     image_paths = list_images(images_dir, args.limit)
     if not image_paths:
         raise RuntimeError(f"No images found in {images_dir}")
@@ -393,7 +428,7 @@ def main() -> None:
     metrics_payload = {
         "prompt": args.prompt,
         "model_id": args.model_id,
-        "dataset_yaml": str(args.dataset),
+        "dataset_yaml": str(dataset_yaml),
         "num_images": len(image_paths),
         "num_ground_truth_boxes": int(sum(len(v) for v in ground_truths.values())),
         "num_predictions": int(sum(len(v) for v in predictions.values())),
