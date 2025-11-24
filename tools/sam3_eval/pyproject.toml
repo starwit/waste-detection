@@ -1,0 +1,22 @@
+[project]
+name = "sam3-eval"
+version = "0.1.0"
+description = "Run SAM 3 promptable segmentation on the waste test set and score detections like the existing evaluator."
+authors = [{name = "edgar", email = "placeholder@example.com"}]
+requires-python = ">=3.11"
+dependencies = [
+    "torch (>=2.3.0)",
+    "torchvision (>=0.18.0)",
+    "transformers (>=4.48.0)",
+    "numpy (>=1.26.0)",
+    "Pillow (>=10.3.0)",
+    "PyYAML (>=6.0.0)",
+    "tqdm (>=4.66.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
