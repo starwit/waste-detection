@@ -46,3 +46,7 @@ Konsortialtreffen/*
 WAS_videos/
 
 .tmp
+
+tools/sam3_eval/output/*
+tools/frame-mining/video_mining_output/*
+tools/sam3_eval_on_testset/output/*
