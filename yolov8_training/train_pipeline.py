@@ -18,6 +18,7 @@ from yolov8_training.utils.evaluate import (
     evaluate_and_log_model_results,
     generate_side_by_side_comparisons,
 )
+from yolov8_training.utils.replay import build_or_update_replay_set
 
 from yolov8_training.utils.find_duplicates import DuplicateDetector
 
@@ -93,18 +94,19 @@ def _load_params_yaml():
         return {}
 
 def load_class_config(params: dict | None = None):
-    """Load class configuration from params.yaml"""
+    """Load class configuration from params.yaml including class mapping"""
     if params is None:
         params = _load_params_yaml()
 
     custom_classes = params.get("data", {}).get("custom_classes", [])
     use_coco_classes = params.get("data", {}).get("use_coco_classes", True)
+    class_mapping_config = params.get("data", {}).get("class_mapping", {})
 
     # Filter out None/empty values from custom_classes
     if custom_classes:
         custom_classes = [cls for cls in custom_classes if cls]
 
-    return custom_classes, use_coco_classes
+    return custom_classes, use_coco_classes, class_mapping_config
 
 def load_folder_subset_config(params: dict | None = None):
     """Load folder subset configuration from params.yaml"""
@@ -190,7 +192,8 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
 
 def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
-    finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False
+    finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False,
+    single_phase_overrides: dict | None = None,
 ):
     """
     Train the YOLO model on the specified dataset.
@@ -268,16 +271,25 @@ def train_model(
     if name:
         train_args["name"] = name
     
-    # Add fine-tuning specific parameters
+    # Two-phase path removed for simplicity; single-phase fine-tune only
+
+    # Single-phase (original) path
     if finetune_mode:
         if finetune_lr is not None:
             train_args["lr0"] = finetune_lr
             print(f"Using fine-tuning learning rate: {finetune_lr}")
-        
+
         if freeze_backbone:
             # Freeze backbone layers (layers 0-9 typically for YOLOv8)
             train_args["freeze"] = list(range(10))
             print("Freezing backbone layers for fine-tuning")
+
+        # Allow minimal, explicit overrides (optimizer, mosaic, mixup, close_mosaic, cos_lr, lrf, patience)
+        if single_phase_overrides:
+            sp = {k: v for k, v in single_phase_overrides.items() if v is not None}
+            if sp:
+                print(f"Applying single-phase overrides: {sorted(sp.keys())}")
+                train_args.update(sp)
 
     results = model.train(**train_args)
 
@@ -297,7 +309,8 @@ def process_data(
     augment_multiplier,
     custom_classes=None,
     use_coco_classes=True,
-    folder_subsets=None
+    folder_subsets=None,
+    class_mapping_config=None
 ):
     """
     Process image data for training and validation.
@@ -312,6 +325,7 @@ def process_data(
         custom_classes (list): List of custom class names.
         use_coco_classes (bool): Whether to use COCO classes when custom_classes is empty.
         folder_subsets (dict): Dictionary mapping folder names to subset ratios (0.0-1.0).
+        class_mapping_config (dict): Dictionary mapping target classes to source classes for merging.
 
     Returns:
         int, int, int: Total frames for training, validation and test.
@@ -319,7 +333,7 @@ def process_data(
     if image_input_path.exists():
         return process_single_images(
             image_input_path, train_output_path, test_output_path, val_split, test_split, 
-            augment_multiplier, custom_classes, use_coco_classes, folder_subsets
+            augment_multiplier, custom_classes, use_coco_classes, folder_subsets, class_mapping_config
         )
     return 0, 0, 0
 
@@ -347,7 +361,7 @@ def run_prepare_stage(args):
     # Load params once to avoid multiple file reads
     _params = _load_params_yaml()
     # Load class configuration
-    custom_classes, use_coco_classes = load_class_config(_params)
+    custom_classes, use_coco_classes, class_mapping_config = load_class_config(_params)
     # Load folder subset configuration
     folder_subsets = load_folder_subset_config(_params)
     
@@ -436,10 +450,11 @@ def run_prepare_stage(args):
             augment_multiplier=augment_multiplier,
             custom_classes=custom_classes,
             use_coco_classes=use_coco_classes,
-            folder_subsets=folder_subsets
+            folder_subsets=folder_subsets,
+            class_mapping_config=class_mapping_config
         )
 
-        create_dataset_yaml(training_path, custom_classes, use_coco_classes)
+        create_dataset_yaml(training_path, custom_classes, use_coco_classes, class_mapping_config)
 
         test_folder_frame_count = 0
         if test_data_exists:
@@ -453,10 +468,11 @@ def run_prepare_stage(args):
                 augment_multiplier=1,
                 custom_classes=custom_classes,
                 use_coco_classes=use_coco_classes,
-                folder_subsets={}  # Don't apply subsets to test data
+                folder_subsets={},  # Don't apply subsets to test data
+                class_mapping_config=class_mapping_config
             )
 
-        create_dataset_yaml(test_path, custom_classes, use_coco_classes)
+        create_dataset_yaml(test_path, custom_classes, use_coco_classes, class_mapping_config)
 
         print(f"Total training frames: {total_train_frames}")
         print(f"Total validation frames: {total_val_frames}")
@@ -495,6 +511,7 @@ def run_train_eval_stage(args):
         finetune_lr = train_params.get("finetune_lr", None)
         finetune_epochs = train_params.get("finetune_epochs", None)
         freeze_backbone = train_params.get("freeze_backbone", False)
+        # Two-phase config removed; keep a few single-phase knobs below
         baseline_weights_path = evaluation_params.get("baseline_weights_path")
         # Use fine-tuning epochs if in fine-tuning mode and specified
         if finetune_mode and finetune_epochs is not None:
@@ -507,12 +524,37 @@ def run_train_eval_stage(args):
         finetune_lr = None
         freeze_backbone = False
         baseline_weights_path = None
+        params = {}
+        train_params = {}
 
     # Define paths
     dataset_name = Path(args.dataset_name)
     dataset_path = Path("datasets") / dataset_name
     training_path = dataset_path / "train"
     test_path = dataset_path / "test"
+
+    # Prepare minimal single-phase overrides (only applied when two-phase is disabled)
+    single_phase_overrides = None
+    if finetune_mode:
+        # Support a small set of safe knobs for one-step FT to avoid optimizer=auto overrides
+        single_phase_overrides = {}
+        opt = train_params.get("optimizer", None)
+        if opt and opt != "auto":
+            single_phase_overrides["optimizer"] = opt
+        # Allow optional augmentation/schedule overrides using existing keys if present
+        for key_param, key_yolo in (
+            ("mosaic", "mosaic"),
+            ("close_mosaic", "close_mosaic"),
+            ("mixup", "mixup"),
+            ("cos_lr", "cos_lr"),
+            ("lrf", "lrf"),
+            ("patience", "patience"),
+        ):
+            v = train_params.get(key_param, None)
+            if v is not None:
+                single_phase_overrides[key_yolo] = v
+        if not single_phase_overrides:
+            single_phase_overrides = None
 
     # Train the model
     model, results, train_output_dir = train_model(
@@ -526,6 +568,7 @@ def run_train_eval_stage(args):
         pretrained_model_path=pretrained_model_path,
         finetune_lr=finetune_lr,
         freeze_backbone=freeze_backbone,
+        single_phase_overrides=single_phase_overrides,
     )
 
     # Determine the final experiment display name (append suffix in finetune mode)
@@ -599,6 +642,19 @@ def run_train_eval_stage(args):
         test_img_dir=test_path / "val" / "images",
         output_dir=train_output_dir,
     )
+
+    # Optionally mine hard examples from the validation split and persist a replay set
+    auto_replay_cfg = (params.get("prepare", {}) or {}).get("auto_replay", {}) if 'params' in locals() else {}
+    if auto_replay_cfg and auto_replay_cfg.get("enabled", False):
+        try:
+            build_or_update_replay_set(
+                model=model,
+                training_path=training_path,
+                train_output_dir=train_output_dir,
+                config=auto_replay_cfg,
+            )
+        except Exception as e:
+            print(f"Warning: Auto-replay mining failed: {e}")
 
     delete_unused_folders()
     

@@ -1,8 +1,8 @@
-experiment_name: taco_uav_wob_1280_50epochs-50-20-200-fractions
+experiment_name: uav-taco-cw32-cw33-cw36-cw41-replay-10-2-100-100-100-150-150-freezeB-100ep-oneclass
 image_size: 1280
 model_size: yolov8m.pt
-num_epochs: 50
+num_epochs: 100
 split_parameters:
   val_split: 0.1
-source_run: runs/taco_uav_wob_1280_50epochs-50-20-200-fractions
-source_weights: runs/taco_uav_wob_1280_50epochs-50-20-200-fractions/weights/best.pt
+source_run: runs/uav-taco-cw32-cw33-cw36-cw41-replay-10-2-100-100-100-150-150-freezeB-100ep-oneclass
+source_weights: runs/uav-taco-cw32-cw33-cw36-cw41-replay-10-2-100-100-100-150-150-freezeB-100ep-oneclass/weights/best.pt

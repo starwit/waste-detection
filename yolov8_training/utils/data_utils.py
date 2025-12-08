@@ -127,6 +127,55 @@ def get_class_mapping(custom_classes=None, use_coco_classes=True):
         return {}
 
 
+def apply_class_mapping_config(custom_classes, class_mapping_config):
+    """
+    Apply class mapping configuration to merge classes together.
+    
+    This function takes the original custom_classes list and a mapping configuration,
+    then returns a new class list where source classes are mapped to target classes.
+    
+    Args:
+        custom_classes (list): Original list of class names
+        class_mapping_config (dict): Mapping of target_class -> [source_classes]
+                                     Example: {"waste": ["waste", "cigarette"]}
+    
+    Returns:
+        tuple: (mapped_classes, source_to_target_map)
+            - mapped_classes: List of unique target class names
+            - source_to_target_map: Dict mapping source class name -> target class name
+    """
+    if not class_mapping_config or not custom_classes:
+        return custom_classes, {}
+    
+    # Build source -> target mapping
+    source_to_target = {}
+    for target_class, source_classes in class_mapping_config.items():
+        if isinstance(source_classes, list):
+            for source_class in source_classes:
+                source_to_target[source_class] = target_class
+        else:
+            # Handle case where a single string is provided instead of a list
+            source_to_target[source_classes] = target_class
+    
+    # Build the mapped class list (only unique target classes)
+    mapped_classes = []
+    seen_targets = set()
+    
+    for original_class in custom_classes:
+        # Map to target class if mapping exists, otherwise keep original
+        target_class = source_to_target.get(original_class, original_class)
+        if target_class not in seen_targets:
+            mapped_classes.append(target_class)
+            seen_targets.add(target_class)
+    
+    print(f"\nClass mapping applied:")
+    print(f"  Original classes: {custom_classes}")
+    print(f"  Mapped classes: {mapped_classes}")
+    print(f"  Mapping rules: {source_to_target}")
+    
+    return mapped_classes, source_to_target
+
+
 def map_class_names_to_ids(class_names, target_mapping):
     """
     Map class names to target class IDs.
@@ -159,6 +208,63 @@ def map_class_names_to_ids(class_names, target_mapping):
             print(f"Warning: No mapping found for class '{source_name}' (ID: {source_id})")
     
     return mapping
+
+
+def remap_labels_with_class_mapping(label_path: Path, source_to_target_map: dict, 
+                                    original_class_list: list, final_class_list: list) -> None:
+    """
+    Remap class IDs in label files based on class mapping configuration.
+    
+    This function reads YOLO format labels and remaps class IDs when classes are merged.
+    For example, if 'cigarette' (class 1) is mapped to 'waste' (class 0), all labels
+    with class ID 1 will be changed to class ID 0.
+    
+    Args:
+        label_path: Path to the label file
+        source_to_target_map: Dict mapping source class name -> target class name
+        original_class_list: Original list of class names (to map IDs to names)
+        final_class_list: Final list of class names after mapping (to get target IDs)
+    """
+    if not label_path.exists() or label_path.stat().st_size == 0:
+        return
+    
+    # Build ID mappings
+    # original_class_list has the classes in order: [waste, cigarette]
+    # final_class_list has the unique target classes: [waste]
+    
+    # Map: source_class_id -> target_class_id
+    id_mapping = {}
+    for source_id, source_class_name in enumerate(original_class_list):
+        target_class_name = source_to_target_map.get(source_class_name, source_class_name)
+        if target_class_name in final_class_list:
+            target_id = final_class_list.index(target_class_name)
+            id_mapping[source_id] = target_id
+    
+    # Read and remap labels
+    with open(label_path, 'r') as f:
+        lines = f.readlines()
+    
+    remapped_lines = []
+    modified = False
+    
+    for line in lines:
+        parts = line.strip().split()
+        if not parts:
+            continue
+        
+        original_class_id = int(parts[0])
+        if original_class_id in id_mapping:
+            new_class_id = id_mapping[original_class_id]
+            if new_class_id != original_class_id:
+                modified = True
+            parts[0] = str(new_class_id)
+        
+        remapped_lines.append(' '.join(parts) + '\n')
+    
+    # Only write if something changed
+    if modified:
+        with open(label_path, 'w') as f:
+            f.writelines(remapped_lines)
 
 
 def sorted_iterdir(path):
@@ -229,16 +335,50 @@ def remap_yaml_dataset_labels(dataset_dir: Path, target_class_mapping: dict) -> 
 def _apply_subset_sampling(
     folder_name: str,
     pairs: List[ImageLabelPair],
-    subset_ratio: float
+    subset_ratio
 ) -> List[ImageLabelPair]:
-    if subset_ratio > 1:
+    """Apply per-folder sampling/oversampling.
+
+    subset_ratio can be:
+    - float >1.0   → oversample (handled later in _oversample_train_pairs)
+    - float 0..1   → proportional subsample
+    - int / numeric string → absolute count (deterministic with the set seed)
+    """
+    # Absolute count support ("200" or 200). Treat 1 as 100% (not absolute 1).
+    if isinstance(subset_ratio, str) and subset_ratio.isdigit():
+        count = int(subset_ratio)
+        if count == 1:
+            subset_ratio = 1.0
+        elif count >= 2:
+            if count <= 0:
+                print(f"Warning: Invalid absolute count {subset_ratio} for '{folder_name}'.")
+                return pairs
+            pairs_copy = pairs.copy()
+            random.shuffle(pairs_copy)
+            take = min(count, len(pairs_copy))
+            print(f"Folder '{folder_name}': Using exactly {take} images (absolute count)")
+            return pairs_copy[:take]
+
+    if isinstance(subset_ratio, int):
+        count = int(subset_ratio)
+        if count == 1:
+            subset_ratio = 1.0
+        elif count >= 2:
+            pairs_copy = pairs.copy()
+            random.shuffle(pairs_copy)
+            take = min(count, len(pairs_copy))
+            print(f"Folder '{folder_name}': Using exactly {take} images (absolute count)")
+            return pairs_copy[:take]
+
+    # Float logic (ratios)
+    if isinstance(subset_ratio, float) and subset_ratio > 1:
         print(
             f"Folder '{folder_name}': Oversampling requested "
             f"({subset_ratio*100:.1f}%), applied to training split only"
         )
         return pairs
 
-    elif 0 < subset_ratio < 1:
+    elif isinstance(subset_ratio, float) and 0 < subset_ratio < 1:
         original_count = len(pairs)
         pairs_copy = pairs.copy()
         random.shuffle(pairs_copy)
@@ -249,7 +389,7 @@ def _apply_subset_sampling(
         )
         return pairs_copy[:subset_count]
 
-    elif subset_ratio == 1:
+    elif subset_ratio == 1 or subset_ratio == 1.0:
         print(
             f"Folder '{folder_name}': Using all "
             f"{len(pairs)} images (100%)"
@@ -425,8 +565,11 @@ def _dedupe_pairs(
             ImageLabelPair(img_path, lbl_path, scene_name)
         )
 
+    def _is_oversample(v) -> bool:
+        return isinstance(v, float) and v > 1.0
+
     oversampled_folders: Set[str] = {
-        folder_name for folder_name in folder_subsets.keys() if folder_subsets[folder_name] > 1
+        folder_name for folder_name, ratio in folder_subsets.items() if _is_oversample(ratio)
     }
 
     processed_pairs: List[ImageLabelPair] = []
@@ -462,7 +605,27 @@ def _dedupe_pairs(
         if cross_clusters:
             print(f"Found {len(cross_clusters)} duplicate clusters between folders:")
             detector.print_duplicate_clusters(cross_clusters)
-            cross_unique_images = set(detector.get_unique_images(all_unique_images))
+            # Prefer keeping images from oversampled folders (e.g., new week, replay)
+            # If none in the cluster, fall back to lexicographic first (as detector.get_unique_images)
+            scene_by_path: Dict[Path, str] = {}
+            for scene_name, folder_pairs in folder_groups.items():
+                for img_path, _lbl, _scene in folder_pairs:
+                    scene_by_path[img_path] = scene_name
+
+            cross_keep: Set[Path] = set()
+            for _root, imgs in cross_clusters.items():
+                # rank candidates: replay > any oversampled scene > lexicographic
+                def rank(p: Path) -> tuple[int, int, str]:
+                    scene = scene_by_path.get(p, "")
+                    is_replay = 1 if scene == "replay" or "/replay/" in str(p) else 0
+                    is_oversampled = 1 if scene in oversampled_folders else 0
+                    return (-is_replay, -is_oversampled, str(p))
+
+                keep = sorted(imgs, key=rank)[0]
+                cross_keep.add(keep)
+            # Also keep all images that were not in any duplicate cluster
+            in_any_cluster = {p for imgs in cross_clusters.values() for p in imgs}
+            cross_unique_images = set(p for p in all_unique_images if p not in in_any_cluster) | cross_keep
             processed_pairs = [
                 ImageLabelPair(img_path, lbl_path, scene_name)
                 for img_path, lbl_path, scene_name in processed_pairs
@@ -483,7 +646,8 @@ def _oversample_train_pairs(
 
     extended_pairs = list(train_pairs)
     for folder_name, ratio in folder_subsets.items():
-        if ratio <= 1:
+        # oversample only if float > 1.0; integers are reserved for absolute counts
+        if not (isinstance(ratio, float) and ratio > 1.0):
             continue
 
         folder_pairs = [pair for pair in train_pairs if pair.scene == folder_name]
@@ -513,7 +677,7 @@ def _oversample_train_pairs(
     return extended_pairs
 
 
-def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True):
+def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classes=True, class_mapping_config=None):
     """
     Create dataset.yaml file with appropriate class mapping.
     
@@ -521,9 +685,14 @@ def create_dataset_yaml(dataset_path: Path, custom_classes=None, use_coco_classe
         dataset_path: Path to the dataset directory
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
+        class_mapping_config: Dictionary mapping target classes to source classes for merging
     """
-
-    class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+    # Apply class mapping if configured
+    final_classes = custom_classes
+    if class_mapping_config and custom_classes:
+        final_classes, _ = apply_class_mapping_config(custom_classes, class_mapping_config)
+    
+    class_mapping = get_class_mapping(final_classes, use_coco_classes)
 
     # Get all parts of the path
     yaml_dataset_path = dataset_path.absolute()
@@ -737,6 +906,7 @@ def process_single_images(
     custom_classes=None,
     use_coco_classes=True,
     folder_subsets=None,
+    class_mapping_config=None,
 ):
     """
     Process single images and their labels, splitting them into train/val/test sets.
@@ -752,6 +922,7 @@ def process_single_images(
         custom_classes: List of custom class names
         use_coco_classes: Whether to use COCO classes when custom_classes is empty
         folder_subsets: Dictionary mapping folder names to subset ratios (0.0-1.0)
+        class_mapping_config: Dictionary mapping target classes to source classes for merging
     """
     if folder_subsets is None:
         folder_subsets = {}
@@ -790,6 +961,18 @@ def process_single_images(
     
     # Get target class mapping for remapping
     target_class_mapping = get_class_mapping(custom_classes, use_coco_classes)
+    
+    # Apply class mapping if configured
+    original_class_list = custom_classes if custom_classes else []
+    final_class_list = custom_classes if custom_classes else []
+    source_to_target_map = {}
+    
+    if class_mapping_config and custom_classes:
+        final_class_list, source_to_target_map = apply_class_mapping_config(
+            custom_classes, class_mapping_config
+        )
+        print(f"\nClass mapping will be applied to all label files.")
+        print(f"  Source-to-target mapping: {source_to_target_map}")
 
     for some_folder in sorted_iterdir(input_path):
         if not some_folder.is_dir():
@@ -907,6 +1090,15 @@ def process_single_images(
 
             link_or_copy(img_file, target_img)
             link_or_copy(label_file, target_label)
+            
+            # Apply class mapping to the copied label file if configured
+            if source_to_target_map:
+                remap_labels_with_class_mapping(
+                    target_label, 
+                    source_to_target_map, 
+                    original_class_list, 
+                    final_class_list
+                )
 
             count += 1
         return count
