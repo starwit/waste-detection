@@ -554,9 +554,12 @@ def draw_yolo_annotated_image(
     yolo_confs: List[float],
     waste_class_ids: Iterable[int],
     cigarette_class_ids: Iterable[int],
+    leaf_region_boxes: List[np.ndarray] | None = None,
+    leaf_pile_boxes: List[np.ndarray] | None = None,
 ) -> np.ndarray:
     """
     Draw YOLO detections (waste / cigarette) with their confidence.
+    Also draws leaf_pile and leaf_region boxes if provided.
     Used for the false_positives export.
     """
     img = frame_bgr.copy()
@@ -587,6 +590,38 @@ def draw_yolo_annotated_image(
             2,
             cv2.LINE_AA,
         )
+
+    # leaf piles (class 2) – blue
+    if leaf_pile_boxes:
+        for box in leaf_pile_boxes:
+            x1, y1, x2, y2 = box.astype(int)
+            cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            cv2.putText(
+                img,
+                "leaf_pile",
+                (x1, max(y1 - 5, 0)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+    # leaf regions (class 3) – green
+    if leaf_region_boxes:
+        for box in leaf_region_boxes:
+            x1, y1, x2, y2 = box.astype(int)
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(
+                img,
+                "leaf_region",
+                (x1, max(y1 - 5, 0)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
 
     return img
 
@@ -956,6 +991,20 @@ def process_video(
                         f"{cls_id} {x_c:.6f} {y_c:.6f} {w:.6f} {h:.6f}"
                     )
 
+                # class 2: leaf_pile
+                for box in leaf_pile_boxes:
+                    x_c, y_c, w, h = xyxy_to_xywhn(box, width, height)
+                    fp_label_lines.append(
+                        f"2 {x_c:.6f} {y_c:.6f} {w:.6f} {h:.6f}"
+                    )
+
+                # class 3: leaf_region
+                for box in leaf_region_boxes:
+                    x_c, y_c, w, h = xyxy_to_xywhn(box, width, height)
+                    fp_label_lines.append(
+                        f"3 {x_c:.6f} {y_c:.6f} {w:.6f} {h:.6f}"
+                    )
+
                 if fp_label_lines:
                     label_out_path_fp = fp_labels_dir / f"{file_stem}.txt"
                     with open(label_out_path_fp, "w") as f:
@@ -968,6 +1017,8 @@ def process_video(
                         [yolo_conf_relevant[j] for j in fp_indices],
                         args.yolo_waste_class_ids,
                         args.yolo_cigarette_class_ids,
+                        leaf_region_boxes=leaf_region_boxes,
+                        leaf_pile_boxes=leaf_pile_boxes,
                     )
                     anno_out_path_fp = fp_annotated_dir / f"{file_stem}.jpg"
                     cv2.imwrite(str(anno_out_path_fp), annotated_fp)
