@@ -8,6 +8,11 @@ data:
     # Example custom classes (uncomment and modify as needed):
   - waste
   - cigarette
+  - leaf_pile
+  - leaf_region_dense
+  - leaf_region_sparse
+  - bottle
+
   use_coco_classes: false
   
   # Class mapping configuration - merge multiple classes into one
@@ -15,7 +20,9 @@ data:
   # Format: target_class: [source_class1, source_class2, ...]
   # Example: map both 'waste' and 'cigarette' into a single 'waste' class
   class_mapping:
-    waste: [waste, cigarette]  # Both waste and cigarette will be treated as waste
+    waste: [waste, cigarette, bottle] 
+    leaves_dense: [leaf_pile, leaf_region_dense]
+    leaves_sparse: [leaf_region_sparse]
     # Add more mappings as needed:
     # trash: [waste, litter, garbage]
 prepare:
@@ -44,7 +51,9 @@ prepare:
     cw32-08-07-train: 1
     cw33: 1
     cw36-auto-mined: 1.0
-    cw41-auto-mined: 1.5
+    cw41-auto-mined: 1.0
+    cw39-sam3-gated: 1.5
+    cw39-maybe-false-positives: 1.5
     replay: 1.5
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:

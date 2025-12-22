@@ -6,9 +6,9 @@ stages:
     deps:
     - path: raw_data/
       hash: md5
-      md5: 90985289baff737ab45b5f74473e2386.dir
-      size: 6611747396
-      nfiles: 18131
+      md5: d6607fa1556b9663336839a847497cc5.dir
+      size: 6843810503
+      nfiles: 24386
     - path: yolov8_training/train_pipeline.py
       hash: md5
       md5: fd9f0052f783aa00c0ac232308ae71f6
@@ -33,11 +33,21 @@ stages:
           custom_classes:
           - waste
           - cigarette
+          - leaf_pile
+          - leaf_region_dense
+          - leaf_region_sparse
+          - bottle
           use_coco_classes: false
           class_mapping:
             waste:
             - waste
             - cigarette
+            - bottle
+            leaves_dense:
+            - leaf_pile
+            - leaf_region_dense
+            leaves_sparse:
+            - leaf_region_sparse
         prepare:
           val_split: 0.1
           test_split: 0.1
@@ -58,14 +68,16 @@ stages:
             cw32-08-07-train: 1
             cw33: 1
             cw36-auto-mined: 1.0
-            cw41-auto-mined: 1.5
+            cw41-auto-mined: 1.0
+            cw39-sam3-gated: 1.5
+            cw39-maybe-false-positives: 1.5
             replay: 1.5
     outs:
     - path: datasets/waste-detection
       hash: md5
-      md5: 7e884a821f20f266c5419f52076495ee.dir
-      size: 3195572794
-      nfiles: 5444
+      md5: 037ac180eb7babb9571bde430833a627.dir
+      size: 4323404511
+      nfiles: 6994
   train_and_evaluate:
     cmd: "python yolov8_training/train_pipeline.py --stage train --dataset-name waste-detection
       --model-size m --image-size 1280 --epochs 100 --batch-size 8 --val-split 0.1\n"
