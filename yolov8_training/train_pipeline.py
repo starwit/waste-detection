@@ -4,6 +4,12 @@ import time
 import shutil
 import random
 from pathlib import Path
+
+# Set matplotlib backend to non-GUI before any imports that might use it
+# This prevents "Cannot load backend 'tkagg'" errors on headless systems
+import matplotlib
+matplotlib.use('Agg')
+
 import numpy as np
 import torch
 import yaml
