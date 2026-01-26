@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+poetry.toml
+
+# Local artifacts from experiments / visualization
+model_comparison*/
+review_images/
+test_output_labels/
+
+# Optional local outputs if you point --out here
+output/
+viz/

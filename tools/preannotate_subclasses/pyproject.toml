@@ -1,0 +1,23 @@
+[project]
+name = "preannotate-subclasses"
+version = "0.1.0"
+description = "Auto-subclassify existing YOLO bounding boxes using a VLM"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.45.0",
+    "accelerate>=0.25.0",
+    "pillow>=9.0.0",
+    "tqdm>=4.65.0",
+    "pyyaml>=6.0",
+    "qwen-vl-utils>=0.0.8",
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
