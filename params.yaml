@@ -52,9 +52,8 @@ prepare:
     cw33: 1
     cw36-auto-mined: 1.0
     cw41-auto-mined: 1.0
-    cw39-sam3-gated: 1.5
     cw39-maybe-false-positives: 1.5
-    replay: 1.5
+    # replay: 1.5
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
   model_size: m
