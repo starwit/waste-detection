@@ -200,6 +200,7 @@ def train_model(
     dataset_path, model_size, image_size, batch_size, experiment_name, epochs=100,
     finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False,
     single_phase_overrides: dict | None = None,
+    model_name: str = "yolov8",
 ):
     """
     Train the YOLO model on the specified dataset.
@@ -238,7 +239,8 @@ def train_model(
         if finetune_mode and pretrained_model_path:
             print(f"Warning: Fine-tuning mode enabled but pre-trained model not found at {pretrained_model_path}")
             print("Falling back to training from scratch with YOLO checkpoint")
-        checkpoint_name = f"yolov8{model_size}.pt"
+        checkpoint_name = f"{model_name}{model_size}.pt"
+        print(f"Using YOLO checkpoint: {checkpoint_name}")
         try:
             model = YOLO(checkpoint_name)
         except Exception as e:
@@ -517,6 +519,7 @@ def run_train_eval_stage(args):
         finetune_lr = train_params.get("finetune_lr", None)
         finetune_epochs = train_params.get("finetune_epochs", None)
         freeze_backbone = train_params.get("freeze_backbone", False)
+        model_name = train_params.get("model_name", "yolov8")
         # Two-phase config removed; keep a few single-phase knobs below
         baseline_weights_path = evaluation_params.get("baseline_weights_path")
         # Use fine-tuning epochs if in fine-tuning mode and specified
@@ -530,6 +533,7 @@ def run_train_eval_stage(args):
         finetune_lr = None
         freeze_backbone = False
         baseline_weights_path = None
+        model_name = "yolov8"
         params = {}
         train_params = {}
 
@@ -575,6 +579,7 @@ def run_train_eval_stage(args):
         finetune_lr=finetune_lr,
         freeze_backbone=freeze_backbone,
         single_phase_overrides=single_phase_overrides,
+        model_name=model_name,
     )
 
     # Determine the final experiment display name (append suffix in finetune mode)
@@ -595,10 +600,10 @@ def run_train_eval_stage(args):
 
     # 3) Final fallback: COCO checkpoint matching the requested model size
     if baseline_model is None:
-        baseline_checkpoint = f"yolov8{model_size}.pt"
+        baseline_checkpoint = f"{model_name}{model_size}.pt"
         print(f"\n{'='*70}")
         print(f"No custom baseline model found.")
-        print(f"Using official YOLOv8 COCO checkpoint: {baseline_checkpoint}")
+        print(f"Using official YOLO COCO checkpoint: {baseline_checkpoint}")
         print(f"{'='*70}\n")
         try:
             baseline_model = YOLO(baseline_checkpoint)
@@ -609,7 +614,7 @@ def run_train_eval_stage(args):
                 f"Attempted checkpoint: '{baseline_checkpoint}'. Ensure network access or set "
                 "evaluation.baseline_weights_path to a valid local file."
             ) from e
-        baseline_display_name = f"yolov8{model_size}-coco"
+        baseline_display_name = f"{model_name}{model_size}-coco"
 
     # Evaluate and log results for the baseline model
     evaluate_and_log_model_results(

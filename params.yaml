@@ -56,6 +56,7 @@ prepare:
     # replay: 1.5
     # Add more folders as needed. Folders not listed here will use 100% of their images
 train:
+  model_name: yolov8  # YOLO model family: yolov8, yolo11, yolo12, yolo26, yolov10, etc.
   model_size: m
   image_size: 1280
   epochs: 100
