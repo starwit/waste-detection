@@ -24,25 +24,26 @@ stages:
     cmd: >
       python yolov8_training/train_pipeline.py --stage train
       --dataset-name ${data.dataset_name}
-      --model-size ${train.model_size}
-      --image-size ${train.image_size}
-      --epochs ${train.epochs}
-      --batch-size ${train.batch_size}
+      --model ${train.model}
       --val-split ${prepare.val_split}
     params:
       - data
       - prepare.val_split
       - train
+      - models
       - evaluation.baseline_weights_path
     deps:
       - yolov8_training/train_pipeline.py
       - yolov8_training/utils/evaluate.py
       - yolov8_training/utils/data_utils.py
+      - yolov8_training/utils/rfdetr_adapter.py
       - yolov8_training/utils/find_duplicates.py
       - datasets/${data.dataset_name}
-      # Track configured baseline paths for DVC change detection
-      # Stub files (0-byte) satisfy DVC deps but are rejected by training code
-      - ${train.pretrained_model_path}
+      # Track configured weight paths so DVC re-runs when they change.
+      # On fresh clones _ensure_default_baseline_stub() creates 0-byte stubs
+      # that satisfy DVC but are rejected at runtime (size == 0), causing
+      # the pipeline to fall back to an official YOLO COCO checkpoint.
+      - ${train.finetune.weights}
       - ${evaluation.baseline_weights_path}
     outs:
       - runs

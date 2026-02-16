@@ -11,7 +11,7 @@ from yolov8_training.utils.replay import build_or_update_replay_set
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed or update the replay set from a model and prepared dataset.")
-    parser.add_argument("--weights", type=str, default=None, help="Path to model weights (.pt). Defaults to params train.pretrained_model_path or evaluation.baseline_weights_path.")
+    parser.add_argument("--weights", type=str, default=None, help="Path to model weights (.pt). Defaults to params train.finetune.weights or evaluation.baseline_weights_path.")
     parser.add_argument("--dataset-name", type=str, default=None, help="Dataset name. Defaults to params.data.dataset_name.")
     parser.add_argument("--max-new", type=int, default=None, help="Max new replay items to add.")
     parser.add_argument("--max-total", type=int, default=None, help="Cap total replay items.")
@@ -31,9 +31,10 @@ def main() -> None:
     if not dataset_name:
         raise SystemExit("dataset_name not found; pass --dataset-name or set data.dataset_name in params.yaml")
 
-    weights = args.weights or train_cfg.get("pretrained_model_path") or eval_cfg.get("baseline_weights_path")
+    finetune_cfg = train_cfg.get("finetune", {}) if isinstance(train_cfg.get("finetune", {}), dict) else {}
+    weights = args.weights or finetune_cfg.get("weights") or train_cfg.get("pretrained_model_path") or eval_cfg.get("baseline_weights_path")
     if not weights:
-        raise SystemExit("No weights provided; pass --weights or set train.pretrained_model_path / evaluation.baseline_weights_path")
+        raise SystemExit("No weights provided; pass --weights or set train.finetune.weights / evaluation.baseline_weights_path")
 
     training_path = Path("datasets") / dataset_name / "train"
     if not (training_path / "val" / "images").exists():
@@ -54,4 +55,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

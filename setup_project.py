@@ -54,9 +54,12 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
     with PARAMS_FILE.open("r") as f:
         params = yaml.load(f)
 
+    # Ensure nested structure exists
+    data_cfg = params.setdefault("data", {})
+
     # Basic fields
-    params["data"]["dataset_name"] = dataset
-    params["data"]["experiment_name"] = experiment
+    data_cfg["dataset_name"] = dataset
+    data_cfg["experiment_name"] = experiment
 
     # Ask about custom classes
     use_custom = input("Do you want to use custom classes? [y/N]: ").strip().lower() == "y"
@@ -65,16 +68,20 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
         class_input = input("Enter custom classes (comma-separated): ").strip()
         classes = [c.strip() for c in class_input.split(",") if c.strip()]
         if classes:
-            params["data"]["custom_classes"] = classes
-            params["data"]["use_coco_classes"] = False
+            data_cfg["custom_classes"] = classes
+            data_cfg["use_coco_classes"] = False
+            # Keep class_mapping consistent with the selected class list.
+            data_cfg["class_mapping"] = {cls: [cls] for cls in classes}
         else:
             print("No valid classes entered. Falling back to COCO classes.")
-            params["data"].pop("custom_classes", None)
-            params["data"]["use_coco_classes"] = True
+            data_cfg["custom_classes"] = []
+            data_cfg["use_coco_classes"] = True
+            data_cfg["class_mapping"] = {}
     else:
         # COCO fallback: remove custom_classes entirely
-        params["data"].pop("custom_classes", None)
-        params["data"]["use_coco_classes"] = True
+        data_cfg["custom_classes"] = []
+        data_cfg["use_coco_classes"] = True
+        data_cfg["class_mapping"] = {}
 
     with PARAMS_FILE.open("w") as f:
         yaml.dump(params, f)
