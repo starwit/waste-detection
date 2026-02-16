@@ -7,6 +7,11 @@ import tempfile
 import traceback
 import json
 
+# Set matplotlib backend to non-GUI before any imports that might use it
+# This prevents "Cannot load backend 'tkagg'" errors on headless systems
+import matplotlib
+matplotlib.use('Agg')
+
 import cv2
 import numpy as np
 import yaml
@@ -53,9 +58,14 @@ def evaluate_and_log_model_results(
     is_original=False,
     baseline_model=None,
     baseline_display_name=None,
+    baseline_results=None,
 ):
     """
     Evaluates the model on the test set, prepares metadata, and appends results to the CSV.
+
+    Returns:
+        tuple: ``(metadata, results)`` where *metadata* is the experiment info dict
+        and *results* is the metrics dict produced by :func:`validate_model`.
     """
     # Get class information from dataset
     dataset_yaml_path = test_path / "dataset.yaml"
@@ -108,7 +118,7 @@ def evaluate_and_log_model_results(
 
             base_results = validate_model(
                 base_model, data=str(dataset_yaml_path), class_ids=class_ids, imgsz=image_size, workers=0, write_json=False
-            )
+            ) if baseline_results is None else baseline_results
             # Determine base model name for display
             mean_table(base_results, results, model_name, True, base_model_name)
         except Exception as e:
@@ -116,75 +126,7 @@ def evaluate_and_log_model_results(
             # Still add the retrained model results to the table
             mean_table(None, results, model_name, False, None)
 
-    return metadata
-
-
-def save_false_predictions(model, test_path, output_dir, conf_threshold=0.25):
-    # Create directory for false predictions
-    false_pred_dir = output_dir / "false_predictions"
-    false_pred_dir.mkdir(exist_ok=True)
-
-    # Get test image directory
-    test_img_dir = test_path / "val" / "images"
-    test_label_dir = test_path / "val" / "labels"
-
-    # Process each image in test set
-    for img_path in test_img_dir.glob("*"):
-        # Get corresponding label file
-        label_path = test_label_dir / (img_path.stem + ".txt")
-
-        # Run prediction
-        results = model.predict(str(img_path), conf=conf_threshold, save=False)
-        result = results[0]
-
-        # Get ground truth boxes
-        gt_boxes = []
-        if label_path.exists():
-            with open(label_path, "r") as f:
-                for line in f:
-                    class_id, x, y, w, h = map(float, line.strip().split())
-                    gt_boxes.append({"class": int(class_id), "box": [x, y, w, h]})
-
-        # Get predicted boxes
-        pred_boxes = []
-        for box in result.boxes:
-            pred_boxes.append(
-                {
-                    "class": int(box.cls),
-                    "conf": float(box.conf),
-                    "box": box.xywhn[0].tolist(),  # normalized coordinates
-                }
-            )
-
-        # Check for false predictions
-        has_false_prediction = False
-
-        # Simple check for mismatches between predictions and ground truth
-        if len(gt_boxes) != len(pred_boxes):
-            has_false_prediction = True
-        else:
-            # More detailed comparison could be implemented here
-            # This is a simplified version
-            for gt_box in gt_boxes:
-                match_found = False
-                for pred_box in pred_boxes:
-                    if gt_box["class"] == pred_box["class"] and all(
-                        abs(g - p) < 0.1 for g, p in zip(gt_box["box"], pred_box["box"])
-                    ):
-                        match_found = True
-                        break
-                if not match_found:
-                    has_false_prediction = True
-                    break
-
-        # If false prediction found, save the image with annotations
-        if has_false_prediction:
-            # Plot predictions and ground truth
-            result_plotted = result.plot()
-
-            # Save the annotated image
-            save_path = false_pred_dir / f"false_pred_{img_path.name}"
-            cv2.imwrite(str(save_path), result_plotted)
+    return metadata, results
 
 
 def get_dataset_classes(dataset_yaml_path):
@@ -200,62 +142,80 @@ def get_dataset_classes(dataset_yaml_path):
     """
     try:
         with open(dataset_yaml_path, "r") as f:
-            dataset_config = yaml.safe_load(f)
-        
-        names_data = dataset_config.get("names", {})
-        
-        # Check if names is a list or dict and handle accordingly
-        if isinstance(names_data, list):
-            # Convert list to dictionary mapping indices to names
-            class_names = {i: name for i, name in enumerate(names_data)}
-            class_ids = list(range(len(names_data)))
-        elif isinstance(names_data, dict):
-            # Use existing dictionary format
-            class_names = names_data
-            class_ids = list(class_names.keys())
-        else:
-            # Fallback for unexpected format
-            print(f"Warning: Unexpected format for 'names' in {dataset_yaml_path}. Expected list or dict, got {type(names_data)}")
-            class_names = {}
-            class_ids = []
-        
-        return class_names, class_ids
+            dataset_config = yaml.safe_load(f) or {}
     except Exception as e:
         print(f"Warning: Could not read dataset classes from {dataset_yaml_path}: {e}")
         return {}, []
 
+    names_data = dataset_config.get("names", {})
 
-def calculate_fp_fn_tp(confusion_matrix, class_ids=None):
+    # Check if names is a list or dict and handle accordingly
+    if isinstance(names_data, list):
+        # Convert list to dictionary mapping indices to names
+        class_names = {i: name for i, name in enumerate(names_data)}
+        class_ids = list(range(len(names_data)))
+    elif isinstance(names_data, dict):
+        # Use existing dictionary format
+        class_names = names_data
+        class_ids = list(class_names.keys())
+    else:
+        # Fallback for unexpected format
+        print(
+            f"Warning: Unexpected format for 'names' in {dataset_yaml_path}. "
+            f"Expected list or dict, got {type(names_data)}"
+        )
+        class_names = {}
+        class_ids = []
+
+    return class_names, class_ids
+
+
+def _extract_per_class_metrics(metrics, data):
+    """Extract per-class metrics from model validation results.
+
+    Works with both Ultralytics YOLO metrics (``metrics.box``) and RF-DETR
+    adapter metrics (``metrics.per_class``).
+
+    Returns:
+        dict: Mapping of class_name -> {precision, recall, map50, map, f1_score}
     """
-    Calculate false positives, false negatives, and true positives.
-    
-    Args:
-        confusion_matrix: Confusion matrix from model validation
-        class_ids: List of class IDs to consider (if None, use all classes)
-    """
-    if class_ids is None:
-        # Use all available classes except background
-        class_ids = list(range(len(confusion_matrix) - 1))
-    
-    # Create mask for classes to consider
-    mask = [i in class_ids for i in range(len(confusion_matrix) - 1)] + [True]
-    filtered_matrix = confusion_matrix[mask][:, mask]
-    fp = filtered_matrix[:-1, -1].sum()
-    fn = filtered_matrix[-1, :-1].sum()
-    tp = filtered_matrix.diagonal()[:-1].sum()
-    return fp, fn, tp
+    per_class = {}
+    try:
+        # Load class names from dataset yaml
+        with open(data) as f:
+            ds_config = yaml.safe_load(f)
+        names = ds_config.get("names", {})
+        if isinstance(names, list):
+            names = {i: n for i, n in enumerate(names)}
 
+        # Ultralytics-style: metrics.box has per-class arrays
+        if hasattr(metrics, 'box') and hasattr(getattr(metrics, 'box', None), 'ap_class_index'):
+            box = metrics.box
+            ap_class_idx = box.ap_class_index
+            if hasattr(ap_class_idx, '__len__') and len(ap_class_idx) > 0:
+                ap50_vals = box.ap50
+                ap_vals = box.ap  # mAP50-95 per class
+                for i, cls_idx in enumerate(ap_class_idx):
+                    cls_name = names.get(int(cls_idx), f"class_{int(cls_idx)}")
+                    p = float(box.p[i])
+                    r = float(box.r[i])
+                    a50 = float(ap50_vals[i])
+                    a = float(ap_vals[i])
+                    f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+                    per_class[cls_name] = {
+                        "precision": p,
+                        "recall": r,
+                        "map50": a50,
+                        "map": a,
+                        "f1_score": f1,
+                    }
+        # RF-DETR adapter: metrics.per_class dict
+        elif hasattr(metrics, 'per_class') and metrics.per_class:
+            return dict(metrics.per_class)
+    except Exception as e:
+        print(f"Warning: Could not extract per-class metrics: {e}")
 
-def calculate_additional_metrics(fp, fn, tp):
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1_score = (
-        2 * (precision * recall) / (precision + recall)
-        if (precision + recall) > 0
-        else 0
-    )
-    fpr = fp / (fp + tp + fn) if (fp + tp + fn) > 0 else 0
-    return precision, recall, f1_score, fpr
+    return per_class
 
 
 def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
@@ -277,7 +237,14 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     metrics = model.val(
         data=data, verbose=False, save=False, plots=False, **validation_kwargs
     )
-    time_taken = float(metrics.speed["inference"])
+
+    # Compute average per-frame time in ms (preprocess + inference + postprocess)
+    spd = metrics.speed
+    ms_per_frame = (
+        float(spd.get("preprocess", 0.0))
+        + float(spd.get("inference", 0.0))
+        + float(spd.get("postprocess", 0.0))
+    )
 
     # Extract values directly from results_dict
     precision = float(metrics.results_dict["metrics/precision(B)"])
@@ -302,8 +269,13 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
         "map50": map50,
         "fitness": fitness,
         "f1_score": f1_score,
-        "time": time_taken,
+        "ms/frame": ms_per_frame,
     }
+
+    # Extract per-class metrics
+    per_class = _extract_per_class_metrics(metrics, data)
+    if per_class:
+        metrics_dict["per_class"] = per_class
 
     # Get scene-specific metrics
     scene_metrics = calculate_scene_metrics(model, data, **kwargs)
@@ -466,6 +438,250 @@ def calculate_scene_metrics(model, data, **kwargs):
     return scene_metrics
 
 
+def evaluate_merged_class_subsets(model, model_name, test_path, raw_test_path,
+                                   class_mapping_config, custom_classes, **kwargs):
+    """Evaluate model on test-image subsets that originally contained merged source classes.
+
+    When classes are merged (e.g. cigarette → waste), this evaluates the model
+    specifically on images that originally had cigarette annotations.  This enables
+    direct comparison between:
+
+    * A model with cigarette as a separate class → per-class AP already shows this.
+    * A model with cigarette merged into waste → this subset evaluation shows it.
+
+    Args:
+        model: The model to evaluate.
+        model_name: Display name for the model.
+        test_path: Path to the prepared test dataset (mapped labels).
+        raw_test_path: Path to ``raw_data/test/`` (original labels before mapping).
+        class_mapping_config: ``data.class_mapping`` from params.yaml.
+        custom_classes: ``data.custom_classes`` from params.yaml.
+        **kwargs: Extra eval kwargs forwarded to ``model.val()`` (e.g. ``imgsz``).
+
+    Returns:
+        dict: ``source_class_name`` → ``{target_class, precision, recall, ap50, ap, f1_score, n_objects}``
+    """
+    if not class_mapping_config or not custom_classes:
+        return {}
+    if not raw_test_path or not Path(raw_test_path).exists():
+        return {}
+
+    raw_test_path = Path(raw_test_path)
+
+    # Find source classes that were merged into a different target
+    merged_sources = {}  # source_class → target_class
+    for target, sources in class_mapping_config.items():
+        if isinstance(sources, str):
+            sources = [sources]
+        for src in sources:
+            if src != target:
+                merged_sources[src] = target
+
+    if not merged_sources:
+        return {}
+
+    # Build original class name → ID mapping (before mapping was applied)
+    original_class_to_id = {cls: i for i, cls in enumerate(custom_classes)}
+
+    # Prepared test set paths
+    test_images_dir = test_path / "val" / "images"
+    test_labels_dir = test_path / "val" / "labels"
+    dataset_yaml = test_path / "dataset.yaml"
+
+    if not dataset_yaml.exists() or not test_images_dir.exists():
+        return {}
+
+    with open(dataset_yaml) as f:
+        ds_config = yaml.safe_load(f)
+
+    results = {}
+
+    for src_class, target_class in merged_sources.items():
+        src_class_id = original_class_to_id.get(src_class)
+        if src_class_id is None:
+            continue
+
+        # Scan raw test labels for images containing this source class
+        matching_stems: set[str] = set()
+        n_objects = 0
+        for scene_dir in sorted(raw_test_path.iterdir()):
+            if not scene_dir.is_dir():
+                continue
+            scene_name = scene_dir.name
+            labels_dir = scene_dir / "labels"
+            if not labels_dir.exists():
+                continue
+            for label_file in labels_dir.glob("*.txt"):
+                if label_file.stat().st_size == 0:
+                    continue
+                file_hits = 0
+                with open(label_file) as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if not parts:
+                            continue
+                        try:
+                            if int(parts[0]) == src_class_id:
+                                file_hits += 1
+                        except ValueError:
+                            continue
+                if file_hits:
+                    prepared_stem = f"{label_file.stem}__scene_{scene_name}"
+                    matching_stems.add(prepared_stem)
+                    n_objects += file_hits
+
+        if not matching_stems:
+            print(f"  No test images found containing '{src_class}' annotations.")
+            continue
+
+        # Create temp directory with matching images + their MAPPED labels
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            temp_images = temp_dir / "images"
+            temp_labels = temp_dir / "labels"
+            temp_images.mkdir()
+            temp_labels.mkdir()
+
+            copied = 0
+            for stem in matching_stems:
+                for ext in (".jpg", ".jpeg", ".png", ".bmp"):
+                    img_src = test_images_dir / f"{stem}{ext}"
+                    if img_src.exists():
+                        shutil.copy2(img_src, temp_images / img_src.name)
+                        label_src = test_labels_dir / f"{stem}.txt"
+                        if label_src.exists():
+                            shutil.copy2(label_src, temp_labels / f"{stem}.txt")
+                        else:
+                            (temp_labels / f"{stem}.txt").touch()
+                        copied += 1
+                        break
+
+            if copied == 0:
+                print(f"  Warning: Could not locate prepared test images for '{src_class}' subset.")
+                continue
+
+            # Write temp dataset.yaml
+            temp_yaml = temp_dir / "dataset.yaml"
+            temp_config = {
+                "path": str(temp_dir),
+                "train": "images",
+                "val": "images",
+                "nc": ds_config.get("nc", len(ds_config.get("names", []))),
+                "names": ds_config.get("names", {}),
+            }
+            with open(temp_yaml, "w") as f:
+                yaml.dump(temp_config, f)
+
+            # Evaluate
+            eval_kwargs = {k: v for k, v in kwargs.items()
+                           if k in ["imgsz", "batch", "conf", "iou"]}
+            eval_kwargs["workers"] = 0
+            eval_kwargs["batch"] = 1
+
+            _, class_ids = get_dataset_classes(str(temp_yaml))
+
+            subset_metrics = model.val(
+                data=str(temp_yaml),
+                classes=class_ids if class_ids else None,
+                verbose=False, save=False, plots=False,
+                **eval_kwargs,
+            )
+
+            p = float(subset_metrics.results_dict.get("metrics/precision(B)", 0.0))
+            r = float(subset_metrics.results_dict.get("metrics/recall(B)", 0.0))
+            ap50 = float(subset_metrics.results_dict.get("metrics/mAP50(B)", 0.0))
+            ap = float(subset_metrics.results_dict.get("metrics/mAP50-95(B)", 0.0))
+            f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+
+            results[src_class] = {
+                "target_class": target_class,
+                "precision": p,
+                "recall": r,
+                "ap50": ap50,
+                "ap": ap,
+                "f1_score": f1,
+                "n_objects": n_objects,
+            }
+
+            print(f"  Merged-class subset '{src_class}→{target_class}': "
+                  f"{copied} images, {n_objects} objects, mAP50={ap50:.4f}, mAP50-95={ap:.4f}")
+
+        except Exception as e:
+            print(f"  Warning: Could not evaluate '{src_class}' subset: {e}")
+            traceback.print_exc()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return results
+
+
+def write_merged_class_results(output_dir, all_model_results):
+    """Write merged-class subset results to CSV and return formatted table.
+
+    Args:
+        output_dir: Directory to write ``merged_class_results.csv``.
+        all_model_results: list of ``(model_name, results_dict)`` tuples.
+    """
+    csv_path = Path(output_dir) / "merged_class_results.csv"
+    columns = ["MODEL", "source_class", "target_class", "n_objects",
+               "precision", "recall", "ap50", "ap", "f1_score"]
+
+    write_header = not csv_path.exists()
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        if write_header:
+            writer.writeheader()
+        for model_name, res in all_model_results:
+            for src_class, m in res.items():
+                row = {
+                    "MODEL": model_name,
+                    "source_class": src_class,
+                    "target_class": m["target_class"],
+                    "n_objects": m["n_objects"],
+                }
+                for col in ("precision", "recall", "ap50", "ap", "f1_score"):
+                    row[col] = f"{m[col]:.4f}"
+                writer.writerow(row)
+
+
+def _format_merged_class_table(csv_path):
+    """Format merged-class CSV into a readable table grouped by model."""
+    with open(csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if not rows:
+        return "No merged-class metrics available.\n"
+
+    from collections import OrderedDict
+    models: dict[str, list[dict]] = OrderedDict()
+    for row in rows:
+        models.setdefault(row["MODEL"], []).append(row)
+
+    metric_cols = ["n_objects", "precision", "recall", "ap50", "ap", "f1_score"]
+    output_parts: list[str] = []
+
+    for model_name, model_rows in models.items():
+        output_parts.append(f"  Model: {model_name}")
+        table_data = []
+        for row in model_rows:
+            table_row = [f"{row['source_class']}→{row['target_class']}"]
+            for col in metric_cols:
+                val = row.get(col, "-")
+                try:
+                    fval = float(val)
+                    table_row.append(f"{fval:.4f}" if col != "n_objects" else str(int(fval)))
+                except (ValueError, TypeError):
+                    table_row.append(str(val))
+            table_data.append(table_row)
+
+        headers = ["merged_class"] + metric_cols
+        table_str = tabulate(table_data, headers=headers, tablefmt="simple")
+        output_parts.append(table_str)
+        output_parts.append("")
+
+    return "\n".join(output_parts)
+
+
 def append_results_to_csv(train_output_dir, results, metadata, is_original=False):
     """
     Append test results to CSV.
@@ -487,7 +703,7 @@ def append_results_to_csv(train_output_dir, results, metadata, is_original=False
             "map50":     results["map50"],
             "fitness":   results["fitness"],
             "f1_score":  results["f1_score"],
-            "time":      results["time"],
+            "ms/frame":  results["ms/frame"],
             "val_split": metadata["split_parameters"]["val_split"],
         }
     # Add scene-specific fitness values
@@ -504,6 +720,83 @@ def append_results_to_csv(train_output_dir, results, metadata, is_original=False
             writer.writeheader()
         writer.writerow(csv_data)
 
+    # Write per-class metrics to a separate CSV
+    per_class = results.get("per_class", {})
+    if per_class:
+        _append_per_class_to_csv(
+            train_output_dir / "test_per_class_results.csv",
+            per_class,
+            model_type,
+        )
+
+
+def _append_per_class_to_csv(csv_path, per_class, model_name):
+    """Append per-class metrics rows to a CSV file.
+
+    Args:
+        csv_path: Path to the per-class CSV file.
+        per_class: dict mapping class_name -> {precision, recall, map50, map, f1_score}.
+        model_name: Display name for the model.
+    """
+    per_class_columns = ["MODEL", "CLASS", "precision", "recall", "ap50", "ap", "f1_score"]
+    write_header = not os.path.exists(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=per_class_columns)
+        if write_header:
+            writer.writeheader()
+        for cls_name, cls_metrics in per_class.items():
+            row = {
+                "MODEL": model_name,
+                "CLASS": cls_name,
+            }
+            # Map internal keys to CSV column names
+            key_map = {"ap50": "map50", "ap": "map"}
+            for col in per_class_columns[2:]:
+                src_key = key_map.get(col, col)
+                val = cls_metrics.get(src_key, cls_metrics.get(col, 0.0))
+                row[col] = f"{val:.4f}" if isinstance(val, (int, float)) else val
+            writer.writerow(row)
+
+
+def _format_per_class_table(per_class_csv_path):
+    """Format per-class CSV into a readable table grouped by model."""
+    with open(per_class_csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if not rows:
+        return "No per-class metrics available.\n"
+
+    # Group by model, preserving insertion order
+    from collections import OrderedDict
+    models: dict[str, list[dict]] = OrderedDict()
+    for row in rows:
+        model_name = row["MODEL"]
+        models.setdefault(model_name, []).append(row)
+
+    metric_cols = ["precision", "recall", "ap50", "ap", "f1_score"]
+    output_parts: list[str] = []
+
+    for model_name, model_rows in models.items():
+        output_parts.append(f"  Model: {model_name}")
+        table_data = []
+        for row in model_rows:
+            table_row = [row["CLASS"]]
+            for col in metric_cols:
+                val = row.get(col, "-")
+                try:
+                    val = float(val)
+                    table_row.append(f"{val:.4f}")
+                except (ValueError, TypeError):
+                    table_row.append(str(val))
+            table_data.append(table_row)
+
+        headers = ["CLASS"] + metric_cols
+        table_str = tabulate(table_data, headers=headers, tablefmt="simple")
+        output_parts.append(table_str)
+        output_parts.append("")  # blank line between models
+
+    return "\n".join(output_parts)
+
 
 def create_formatted_table(csv_path):
     with open(csv_path, "r") as f:
@@ -513,60 +806,62 @@ def create_formatted_table(csv_path):
 
     # Find the best values for each metric column (skip MODEL column)
     best_values = {}
-    for i, header in enumerate(headers[1:]):  # Skip first column
-        try:
-            column_values = [
-                float(row[i + 1])
-                for row in data
-                if i + 1 < len(row) and row[i + 1].strip() and row[i + 1] != "-"
-            ]
-            if column_values:
-                if header == "time":  # Lower is better for time
-                    best_values[header] = min(column_values)
-                else:  # Higher is better for other metrics
-                    best_values[header] = max(column_values)
-        except (IndexError, ValueError) as e:
-            print(f"Warning: Error processing column {header}: {e}")
+    for col_index, header in enumerate(headers[1:], start=1):  # Skip MODEL
+        column_values = []
+        for row in data:
+            if col_index >= len(row):
+                continue
+            raw = row[col_index].strip()
+            if not raw or raw == "-":
+                continue
+            try:
+                column_values.append(float(raw))
+            except ValueError:
+                continue
+
+        if not column_values:
             best_values[header] = None
+        elif header == "ms/frame":  # Lower is better for time
+            best_values[header] = min(column_values)
+        else:  # Higher is better for other metrics
+            best_values[header] = max(column_values)
 
     # Format the data with the best values in bold
     formatted_data = []
     for row in data:
-        try:
-            formatted_row = [row[0]]  # Model name
-            for i, header in enumerate(headers[1:]):  # Skip MODEL
-                try:
-                    if i + 1 < len(row) and row[i + 1].strip() and row[i + 1] != "-":
-                        value = float(row[i + 1])
-                        is_best = (
-                            best_values[header] is not None
-                            and value == best_values[header]
-                        )
-                        if is_best:
-                            formatted_row.append(f"*{value:.4f}*")
-                        else:
-                            formatted_row.append(f"{value:.4f}")
-                    else:
-                        formatted_row.append("-")
-                except (IndexError, ValueError):
-                    formatted_row.append("-")
-            formatted_data.append(formatted_row)
-        except Exception as e:
-            print(f"Warning: Error processing row {row}: {e}")
+        if not row:
             continue
+        formatted_row = [row[0]]  # Model name
+        for col_index, header in enumerate(headers[1:], start=1):  # Skip MODEL
+            raw = row[col_index].strip() if col_index < len(row) else ""
+            if not raw or raw == "-":
+                formatted_row.append("-")
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                formatted_row.append("-")
+                continue
+
+            is_best = best_values.get(header) is not None and value == best_values[header]
+            if is_best:
+                formatted_row.append(f"*{value:.4f}*")
+            else:
+                formatted_row.append(f"{value:.4f}")
+        formatted_data.append(formatted_row)
 
     # Create table
     formatted_table = tabulate(formatted_data, headers=headers, tablefmt="simple")
 
     # Metric descriptions
     descriptions = [
-        "precision (higher is better): The percentage of correct positive predictions out of all positive predictions.",
-        "recall (higher is better): The percentage of actual positive cases correctly identified.",
+        "precision (higher is better): Fraction of correct positive predictions out of all positive predictions.",
+        "recall (higher is better): Fraction of actual positive cases correctly identified.",
         "map (higher is better): Mean Average Precision across IoU thresholds 0.5-0.95.",
         "map50 (higher is better): Mean Average Precision at IoU threshold 0.5.",
-        "fitness (higher is better): Combined metric (0.1*precision + 0.1*recall + 0.8*mAP50).",
+        "fitness (higher is better): Combined metric (0.1*mAP50 + 0.9*mAP50-95).",
         "f1_score (higher is better): Harmonic mean of precision and recall.",
-        "time (lower is better): Total inference time in seconds.",
+        "ms/frame (lower is better): Average inference time per frame in milliseconds (preprocess + inference + postprocess).",
     ]
 
     # Add scene metric descriptions
@@ -582,10 +877,53 @@ def create_formatted_table(csv_path):
     # Write results to file
     txt_path = "./results_comparison/results.txt"
     with open(txt_path, "w") as f:
+        f.write("Overall Metrics:\n")
+        f.write("=" * 80)
+        f.write("\n\n")
         f.write(formatted_table)
         f.write("\n\n")
         f.write("Metric Descriptions:\n")
         f.write(formatted_descriptions)
+
+        # Append per-class table if available
+        per_class_csv_path = "./results_comparison/per_class_results.csv"
+        if os.path.exists(per_class_csv_path):
+            f.write("\n\n")
+            f.write("=" * 80)
+            f.write("\nPer-Class Metrics:\n")
+            f.write("=" * 80)
+            f.write("\n\n")
+            per_class_table = _format_per_class_table(per_class_csv_path)
+            f.write(per_class_table)
+            f.write("\n")
+            f.write("Per-class metric descriptions:\n")
+            f.write("  precision: Fraction of correct positive predictions for this class (at best-F1 confidence).\n")
+            f.write("  recall:    Fraction of actual positives correctly detected for this class (at best-F1 confidence).\n")
+            f.write("  ap50:      Average Precision at IoU threshold 0.5 for this class.\n")
+            f.write("  ap:        Average Precision across IoU 0.5-0.95 for this class.\n")
+            f.write("  f1_score:  Harmonic mean of precision and recall for this class (at best-F1 confidence).\n")
+
+        # Append merged-class subset table if available
+        merged_csv_path = "./results_comparison/merged_class_results.csv"
+        if os.path.exists(merged_csv_path):
+            f.write("\n\n")
+            f.write("=" * 80)
+            f.write("\nMerged-Class Subset Metrics:\n")
+            f.write("(Evaluation on test images that originally contained the source class\n")
+            f.write(" before it was merged into the target class during training)\n")
+            f.write("=" * 80)
+            f.write("\n\n")
+            merged_table = _format_merged_class_table(merged_csv_path)
+            f.write(merged_table)
+            f.write("\n")
+            f.write("Merged-class metric descriptions:\n")
+            f.write("  merged_class: Source class → target class it was merged into.\n")
+            f.write("  n_objects:    Number of source-class annotations (objects) in the subset.\n")
+            f.write("  precision:    Precision on this image subset (all classes).\n")
+            f.write("  recall:       Recall on this image subset (all classes).\n")
+            f.write("  ap50:         mAP@50 on this image subset (all classes).\n")
+            f.write("  ap:           mAP@50-95 on this image subset (all classes).\n")
+            f.write("  f1_score:     F1 score on this image subset (all classes).\n")
 
 
 def _collect_scene_columns(path_results2: dict | None) -> list:
@@ -647,7 +985,7 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
         "map50",
         "fitness",
         "f1_score",
-        "time",
+        "ms/frame",
 ]
 
     # Add scene metrics columns
@@ -664,13 +1002,55 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
     os.makedirs("./results_comparison", exist_ok=True)
 
     csv_path = "./results_comparison/results.csv"
-    write_header = not os.path.exists(csv_path)
 
-    with open(csv_path, "a", newline="") as f:
+    existing_columns: list[str] = []
+    existing_rows: list[dict[str, str]] = []
+    if os.path.exists(csv_path):
+        with open(csv_path, newline="") as f:
+            reader = csv.reader(f)
+            try:
+                existing_columns = next(reader)
+            except StopIteration:
+                existing_columns = []
+            else:
+                for row in reader:
+                    row_dict: dict[str, str] = {}
+                    for idx, col in enumerate(existing_columns):
+                        if idx < len(row):
+                            row_dict[col] = row[idx]
+                    existing_rows.append(row_dict)
+
+    merged_columns = list(existing_columns) if existing_columns else []
+    for col in columns:
+        if col not in merged_columns:
+            merged_columns.append(col)
+    if not merged_columns:
+        merged_columns = list(columns)
+
+    for row in formatted_data:
+        row_dict: dict[str, str] = {}
+        for idx, col in enumerate(columns):
+            if idx < len(row):
+                row_dict[col] = row[idx]
+        existing_rows.append(row_dict)
+
+    with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        if write_header:
-            writer.writerow(columns)
-        writer.writerows(formatted_data)
+        writer.writerow(merged_columns)
+        for row_dict in existing_rows:
+            writer.writerow([row_dict.get(col, "") for col in merged_columns])
+
+    # Write per-class metrics CSV
+    per_class_csv_path = "./results_comparison/per_class_results.csv"
+    if base_run and path_results1 is not None:
+        base_display = base_model_name if base_model_name else "YOLOv8m (base run)"
+        per_class_base = path_results1.get("per_class", {})
+        if per_class_base:
+            _append_per_class_to_csv(per_class_csv_path, per_class_base, base_display)
+
+    per_class_retrained = path_results2.get("per_class", {}) if path_results2 else {}
+    if per_class_retrained:
+        _append_per_class_to_csv(per_class_csv_path, per_class_retrained, experiment_name)
 
     # Create formatted text table from CSV
     create_formatted_table(csv_path)
