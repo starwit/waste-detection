@@ -18,6 +18,7 @@ __pycache__
 *.engine
 *.cache
 *.pt
+*.pth
 
 
 # dataset-images
@@ -46,3 +47,5 @@ Konsortialtreffen/*
 WAS_videos/
 
 .tmp
+
+*output*/
