@@ -6,9 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from dvc.repo import Repo
 
 from tests.pipeline_test_utils import create_minimal_dataset, write_params_yaml
+
+pytestmark = pytest.mark.heavy
 
 
 def _install_ultralytics_stub(workspace: Path) -> None:
@@ -95,11 +98,19 @@ def test_dvc_repro_invalidates_when_baseline_changes(tmp_path: Path):
         {
             "data": {"dataset_name": dataset_name},
             "train": {
-                "model_size": "n",
                 "image_size": 320,
                 "epochs": 1,
                 "batch_size": 1,
-                "pretrained_model_path": str(baseline_weights),
+                "model": "yolov8n",
+                "finetune": {
+                    "weights": str(baseline_weights),
+                },
+            },
+            "models": {
+                "yolov8n": {
+                    "backend": "yolo",
+                    "checkpoint": "yolov8n.pt",
+                }
             },
             "evaluation": {
                 "baseline_weights_path": str(baseline_weights)

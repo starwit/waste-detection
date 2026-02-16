@@ -8,9 +8,36 @@ from types import SimpleNamespace
 import numpy as np
 
 
+class StubBox:
+    """Mimics ``ultralytics.utils.metrics.Metric`` for per-class metrics.
+
+    Required because ``_extract_per_class_metrics()`` in evaluate.py now reads
+    ``metrics.box.ap_class_index``, ``.p``, ``.r``, ``.ap50``, and ``.ap`` to
+    produce per-class results.  Without this stub the E2E smoke tests would
+    crash when that code path runs against ``StubValMetrics``.
+    """
+
+    def __init__(self):
+        self.ap_class_index = np.array([0])
+        self.p = np.array([0.5])
+        self.r = np.array([0.6])
+        self._ap50 = np.array([0.4])
+        self._ap = np.array([0.3])
+
+    @property
+    def ap50(self):
+        return self._ap50
+
+    @property
+    def ap(self):
+        return self._ap
+
+
 class StubValMetrics:
     def __init__(self):
-        self.speed = {"inference": 1.0}
+        # Full speed dict required: validate_model() now computes ms/frame as
+        # preprocess + inference + postprocess (previously only inference was used).
+        self.speed = {"preprocess": 0.5, "inference": 1.0, "postprocess": 0.3}
         self.results_dict = {
             "metrics/precision(B)": 0.5,
             "metrics/recall(B)": 0.6,
@@ -18,6 +45,9 @@ class StubValMetrics:
             "metrics/mAP50-95(B)": 0.3,
         }
         self.fitness = 0.42
+        # Per-class metrics extraction (see _extract_per_class_metrics) reads
+        # metrics.box.ap_class_index / .p / .r / .ap50 / .ap.
+        self.box = StubBox()
 
 
 class StubYOLO:

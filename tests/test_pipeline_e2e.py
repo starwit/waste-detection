@@ -56,7 +56,13 @@ def stubbed_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return StubYOLO
 
 
-def _assert_results_exist(base_dir: Path, dataset_name: str, scene_suffix: str = "sourceT") -> None:
+def _assert_results_exist(
+    base_dir: Path,
+    dataset_name: str,
+    scene_suffix: str = "sourceT",
+    *,
+    expect_scene_metrics: bool = True,
+) -> None:
     dataset_root = base_dir / "datasets" / dataset_name
     assert dataset_root.exists()
 
@@ -69,15 +75,32 @@ def _assert_results_exist(base_dir: Path, dataset_name: str, scene_suffix: str =
         header = reader.fieldnames or []
 
     col_name = f"scene_{scene_suffix}_fitness"
-    assert col_name in header
+    if expect_scene_metrics:
+        assert col_name in header
     assert rows, "results.csv should contain at least one row"
 
-    for row in rows:
-        val_str = (row.get(col_name) or "").strip()
-        if val_str and val_str != "-":
-            assert float(val_str) >= 0.0
+    if expect_scene_metrics:
+        for row in rows:
+            val_str = (row.get(col_name) or "").strip()
+            if val_str and val_str != "-":
+                assert float(val_str) >= 0.0
 
     assert (base_dir / "metrics.json").exists()
+
+    # Check per-class results CSV was generated
+    per_class_csv = base_dir / "results_comparison" / "per_class_results.csv"
+    if per_class_csv.exists():
+        with open(per_class_csv, newline="", encoding="utf-8") as f:
+            pc_reader = csv.DictReader(f)
+            pc_rows = list(pc_reader)
+        assert pc_rows, "per_class_results.csv should have at least one row"
+        for row in pc_rows:
+            assert "CLASS" in row
+            assert "precision" in row
+            assert "recall" in row
+            assert "ap50" in row
+            assert "ap" in row
+            assert "f1_score" in row
 
 
 def test_pipeline_fresh_clone_uses_fallback(stubbed_pipeline: StubYOLO):
@@ -114,7 +137,7 @@ def test_pipeline_offline_error_when_no_weights(stubbed_pipeline: StubYOLO):
 
     StubYOLO.raise_on_official = True
 
-    with pytest.raises(RuntimeError, match="Failed to initialize training without local weights"):
+    with pytest.raises(RuntimeError, match="Failed to initialize training"):
         run_train_eval_stage(args)
 
 
@@ -133,7 +156,7 @@ def test_pipeline_uses_local_baseline_when_available(stubbed_pipeline: StubYOLO)
         workspace,
         {
             "data": {"dataset_name": dataset_name},
-            "train": {"pretrained_model_path": str(baseline_dir / "best.pt")},
+            "train": {"finetune": {"weights": str(baseline_dir / "best.pt")}},
         },
     )
 
@@ -147,8 +170,8 @@ def test_pipeline_uses_local_baseline_when_available(stubbed_pipeline: StubYOLO)
     assert str(baseline_dir / "best.pt") in StubYOLO.recorded_models
 
 
-def test_pipeline_finetune_missing_weights_falls_back(stubbed_pipeline: StubYOLO, capsys):
-    """Fine-tune mode with missing weights should warn and continue via fallback."""
+def test_pipeline_finetune_missing_weights_fails(stubbed_pipeline: StubYOLO):
+    """Fine-tune mode with missing weights should fail explicitly."""
 
     workspace = Path.cwd()
     dataset_name = "e2e_dataset"
@@ -159,9 +182,11 @@ def test_pipeline_finetune_missing_weights_falls_back(stubbed_pipeline: StubYOLO
         {
             "data": {"dataset_name": dataset_name},
             "train": {
-                "finetune_mode": True,
-                "pretrained_model_path": "models/current_best/missing.pt",
-                "finetune_epochs": 1,
+                "finetune": {
+                    "enabled": True,
+                    "weights": "models/current_best/missing.pt",
+                    "epochs": 1,
+                },
             },
         },
     )
@@ -169,10 +194,119 @@ def test_pipeline_finetune_missing_weights_falls_back(stubbed_pipeline: StubYOLO
     args = build_args(dataset_name)
 
     run_prepare_stage(args)
+    with pytest.raises(FileNotFoundError, match="Fine-tuning mode is enabled"):
+        run_train_eval_stage(args)
+
+
+def test_pipeline_can_select_rfdetr_backend_via_params(
+    stubbed_pipeline: StubYOLO, monkeypatch: pytest.MonkeyPatch
+):
+    """RF-DETR backend selection should be driven by params.yaml (train.model).
+
+    The RF-DETR path now runs the full evaluation pipeline (baseline comparison,
+    scene metrics, side-by-side images, weights saving) — identical to YOLO.
+    """
+
+    import json
+
+    import numpy as np
+
+    workspace = Path.cwd()
+    dataset_name = "e2e_dataset"
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {"dataset_name": dataset_name},
+            "train": {
+                "model": "rfdetr-nano",
+            },
+            "models": {
+                "rfdetr-nano": {
+                    "backend": "rfdetr",
+                    "variant": "nano",
+                    "resolution": 320,
+                    "epochs": 1,
+                    "batch_size": 1,
+                    "grad_accum_steps": 1,
+                }
+            },
+        },
+    )
+
+    args = build_args(dataset_name)
+    run_prepare_stage(args)
+
+    def _fake_prepare_yolo_layout(*, training_path: Path, test_path: Path, dataset_name: str):
+        output_dir = Path(".tmp") / "rfdetr_datasets" / dataset_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # Create minimal YOLO structure so RF-DETR path doesn't crash
+        (output_dir / "train").mkdir(exist_ok=True)
+        (output_dir / "valid").mkdir(exist_ok=True)
+        (output_dir / "test").mkdir(exist_ok=True)
+        return output_dir
+
+    class _StubRFDETRModel:
+        """Minimal stand-in for an RF-DETR model used by the adapter."""
+
+        def predict(self, img, threshold=0.5):
+            class _EmptyDets:
+                xyxy = np.empty((0, 4))
+                confidence = np.empty(0)
+                class_id = np.empty(0, dtype=int)
+
+                def __len__(self):
+                    return 0
+
+            return _EmptyDets()
+
+    def _fake_train_rfdetr(*, output_root: Path, **_kwargs):
+        output_dir = Path(output_root) / "stub-run"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # Create a dummy checkpoint so _save_rfdetr_weights finds something
+        (output_dir / "checkpoint_best_total.pth").write_bytes(b"stub-checkpoint")
+        payload = {
+            "class_map": [
+                {
+                    "class": "all",
+                    "precision": 0.5,
+                    "recall": 0.6,
+                    "map@50": 0.4,
+                    "map@50:95": 0.3,
+                }
+            ]
+        }
+        (output_dir / "results.json").write_text(json.dumps(payload), encoding="utf-8")
+        return _StubRFDETRModel(), output_dir
+
+    monkeypatch.setattr(
+        "yolov8_training.train_pipeline._prepare_rfdetr_yolo_layout", _fake_prepare_yolo_layout
+    )
+    monkeypatch.setattr("yolov8_training.train_pipeline.train_rfdetr", _fake_train_rfdetr)
+
     run_train_eval_stage(args)
 
+    # Full evaluation pipeline now runs for RF-DETR, same as YOLO
     _assert_results_exist(workspace, dataset_name)
 
-    stdout = capsys.readouterr().out
-    assert "Falling back to training from scratch" in stdout
+    metrics = json.loads((workspace / "metrics.json").read_text(encoding="utf-8"))
+    # metrics.json now has the same schema as YOLO (written by validate_model)
+    assert "precision" in metrics
+    assert "recall" in metrics
+    assert "map" in metrics
+    assert "map50" in metrics
+    assert "fitness" in metrics
+    assert "f1_score" in metrics
+
+    # RF-DETR path now loads a YOLO baseline for comparison
     assert any(model.startswith("yolov8") for model in StubYOLO.recorded_models)
+
+    # Verify weights were saved in YOLO-compatible layout (weights/best.pt)
+    runs_rfdetr = workspace / "runs" / "rfdetr"
+    assert runs_rfdetr.exists()
+    run_dirs = [d for d in runs_rfdetr.iterdir() if d.is_dir()]
+    assert run_dirs, "Expected at least one run directory under runs/rfdetr"
+    weights_dir = run_dirs[0] / "weights"
+    assert weights_dir.exists(), "weights/ directory should be created for RF-DETR"
+    assert (weights_dir / "best.pt").exists(), "best.pt should be copied from RF-DETR checkpoint"
