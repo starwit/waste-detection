@@ -245,7 +245,6 @@ class RFDETRModelAdapter:
         labels_dir = images_dir.parent / "labels"
 
         class_names = _parse_class_names(ds_cfg)
-        num_classes = len(class_names)
 
         conf_threshold = kwargs.get("conf", 0.001)
         classes_filter: set[int] | None = None

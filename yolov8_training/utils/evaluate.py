@@ -156,12 +156,23 @@ def get_dataset_classes(dataset_yaml_path):
     # Check if names is a list or dict and handle accordingly
     if isinstance(names_data, list):
         # Convert list to dictionary mapping indices to names
-        class_names = {i: name for i, name in enumerate(names_data)}
-        class_ids = list(range(len(names_data)))
-    elif isinstance(names_data, dict):
-        # Use existing dictionary format
-        class_names = names_data
+        class_names = {i: str(name) for i, name in enumerate(names_data)}
         class_ids = list(class_names.keys())
+    elif isinstance(names_data, dict):
+        # Coerce YAML keys like "0" -> 0 for consistency with Ultralytics `classes=[...]`.
+        parsed: dict[int, str] = {}
+        for raw_key, raw_name in names_data.items():
+            try:
+                cls_id = int(raw_key)
+            except (TypeError, ValueError):
+                print(
+                    f"Warning: Invalid class id in {dataset_yaml_path} names mapping: {raw_key!r}"
+                )
+                continue
+            parsed[cls_id] = str(raw_name)
+        # Deterministic ordering by class id
+        class_ids = sorted(parsed.keys())
+        class_names = {k: parsed[k] for k in class_ids}
     else:
         # Fallback for unexpected format
         print(
@@ -190,7 +201,16 @@ def _extract_per_class_metrics(metrics, data):
             ds_config = yaml.safe_load(f)
         names = ds_config.get("names", {})
         if isinstance(names, list):
-            names = {i: n for i, n in enumerate(names)}
+            names = {i: str(n) for i, n in enumerate(names)}
+        elif isinstance(names, dict):
+            parsed_names: dict[int, str] = {}
+            for raw_key, raw_name in names.items():
+                try:
+                    cls_id = int(raw_key)
+                except (TypeError, ValueError):
+                    continue
+                parsed_names[cls_id] = str(raw_name)
+            names = parsed_names
 
         # Ultralytics-style: metrics.box has per-class arrays
         if hasattr(metrics, 'box') and hasattr(getattr(metrics, 'box', None), 'ap_class_index'):

@@ -6,7 +6,7 @@ This repository is a focused fork of our object-detection retraining template, s
 
 | Backend | Config value (`models.<key>.backend`) | Models |
 |---------|---------------------------------------|--------|
-| **Ultralytics YOLO** | `yolo` | YOLOv8, YOLOv10, YOLO11, YOLO12, YOLO26 — any checkpoint |
+| **Ultralytics YOLO** | `yolo` | Any checkpoint supported by `ultralytics` |
 | **RF-DETR** | `rfdetr` | Nano, Small, Medium, Base, Large |
 
 Switching between backends is a one-line change in `params.yaml` (`train.model`). The evaluation pipeline, baseline comparisons, side-by-side visualisations, and DVC tracking work identically for all backends.
