@@ -123,6 +123,19 @@ def test_pipeline_fresh_clone_uses_fallback(stubbed_pipeline: StubYOLO):
     assert any(model.startswith("yolov8") for model in StubYOLO.recorded_models)
 
 
+def test_prepare_stage_fails_when_no_training_data(stubbed_pipeline: StubYOLO):
+    """Prepare should fail early with a clear message when no raw training data exists."""
+
+    workspace = Path.cwd()
+    dataset_name = "e2e_dataset"
+    write_params_yaml(workspace, {"data": {"dataset_name": dataset_name}})
+
+    args = build_args(dataset_name)
+
+    with pytest.raises(ValueError, match="Prepare stage produced 0 training frames"):
+        run_prepare_stage(args)
+
+
 def test_pipeline_offline_error_when_no_weights(stubbed_pipeline: StubYOLO):
     """If official checkpoints cannot be loaded, raise the explicit fallback error."""
 

@@ -838,6 +838,12 @@ def run_prepare_stage(args):
             folder_subsets=folder_subsets,
             class_mapping_config=class_mapping_config
         )
+        if total_train_frames <= 0:
+            raise ValueError(
+                "Prepare stage produced 0 training frames. "
+                f"(train={total_train_frames}, val={total_val_frames}, test={total_test_frames}). "
+                "Ensure raw_data/train contains labeled images and split/subset settings leave at least one training sample."
+            )
 
         create_dataset_yaml(training_path, custom_classes, use_coco_classes, class_mapping_config)
 
