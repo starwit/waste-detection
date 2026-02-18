@@ -84,8 +84,12 @@ def evaluate_and_log_model_results(
         },
         "num_epochs": train_epochs,
         "model_size": model.model_name if hasattr(model, "model_name") else "Unknown",
+        "model_backend": str(getattr(model, "model_backend", "yolo")),
         "image_size": image_size,
     }
+    model_variant = getattr(model, "model_variant", None)
+    if model_variant:
+        metadata["model_variant"] = str(model_variant)
 
     # Append results to CSV
     append_results_to_csv(output_dir, results, metadata, is_original)

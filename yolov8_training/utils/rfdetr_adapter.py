@@ -140,9 +140,12 @@ class RFDETRModelAdapter:
         model_name: str = "RF-DETR",
         resolution: int = 560,
         class_names: Dict[int, str] | None = None,
+        model_variant: str | None = None,
     ):
         self._model = rfdetr_model
         self.model_name = model_name
+        self.model_backend = "rfdetr"
+        self.model_variant = str(model_variant).lower() if model_variant else None
         self._resolution = resolution
         self._class_names = class_names or {}
         # The adapter also needs to look like it has a `model` attr (see train_model code).

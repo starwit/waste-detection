@@ -493,9 +493,9 @@ def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_na
 
 
 
-def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, str | None]:
+def _load_baseline_from_path(path_candidate: str | None) -> tuple[object | None, str | None]:
     """
-    Load YOLO baseline model from a path if it exists and is valid.
+    Load baseline model from a path if it exists and is valid.
     
     Args:
         path_candidate: Path to a .pt weights file (can be relative or absolute)
@@ -519,27 +519,54 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[YOLO | None, s
         print(f"Warning: Baseline weights not found at {candidate_path}")
         return None, None
 
+    meta = {}
+    try:
+        meta_path = candidate_path.parent / "metadata.yaml"
+        if meta_path.exists():
+            with open(meta_path, "r") as mf:
+                meta = yaml.safe_load(mf) or {}
+    except Exception:
+        meta = {}
+
+    display_name = (
+        meta.get("experiment_name")
+        or meta.get("baseline_display_name")
+        or meta.get("run_name")
+        or candidate_path.stem
+    )
+
+    backend = str(meta.get("model_backend", "yolo")).strip().lower()
+    if backend == "rfdetr":
+        try:
+            model_variant = str(meta.get("model_variant", "base")).strip().lower() or "base"
+            resolution = int(meta.get("image_size", 640) or 640)
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            rfdetr_model = _get_rfdetr_model(
+                model_variant=model_variant,
+                pretrain_weights=str(candidate_path),
+                device=device,
+            )
+            from yolov8_training.utils.rfdetr_adapter import RFDETRModelAdapter
+
+            adapter = RFDETRModelAdapter(
+                rfdetr_model,
+                model_name=str(display_name),
+                resolution=int(resolution),
+                model_variant=model_variant,
+            )
+            return adapter, str(display_name)
+        except Exception as load_error:
+            print(f"Warning: Could not load RF-DETR baseline from {candidate_path}: {load_error}")
+            return None, None
+
     try:
         model_instance = YOLO(str(candidate_path))
     except Exception as load_error:
         print(f"Warning: Could not load baseline model from {candidate_path}: {load_error}")
         return None, None
 
-    display_name = None
-    try:
-        meta_path = candidate_path.parent / "metadata.yaml"
-        if meta_path.exists():
-            with open(meta_path, "r") as mf:
-                meta = yaml.safe_load(mf) or {}
-            display_name = (
-                meta.get("experiment_name")
-                or meta.get("baseline_display_name")
-                or meta.get("run_name")
-            )
-    except Exception:
-        display_name = None
-
-    return model_instance, (display_name or candidate_path.stem)
+    return model_instance, str(display_name)
 
 def train_model(
     dataset_path, checkpoint, image_size, batch_size, experiment_name, epochs=100,
@@ -925,6 +952,7 @@ def run_train_eval_stage(args):
             model_name=display_name,
             resolution=rfdetr_resolution,
             class_names=class_names_map,
+            model_variant=rfdetr_variant,
         )
 
         # ── Clean up temporary YOLO layout (not needed after training) ──
@@ -993,6 +1021,12 @@ def run_train_eval_stage(args):
         val_split=val_split,
         baseline_weights_path=resolved_cfg.get("baseline_weights_path"),
         fallback_checkpoint=resolved_cfg["fallback_checkpoint"],
+        finetune_weights_path=(
+            str(resolved_cfg.get("pretrained_model_path"))
+            if bool(resolved_cfg.get("finetune_mode", False))
+            and resolved_cfg.get("pretrained_model_path")
+            else None
+        ),
         params=params,
     )
 
@@ -1000,7 +1034,8 @@ def run_train_eval_stage(args):
 def _resolve_baseline_model(
     baseline_weights_path: str | None,
     fallback_checkpoint: str,
-) -> tuple[YOLO, str]:
+    finetune_weights_path: str | None = None,
+) -> tuple[object, str]:
     """Resolve the baseline model for evaluation comparison.
 
     1. Try ``baseline_weights_path`` (``evaluation.baseline_weights_path``).
@@ -1011,6 +1046,19 @@ def _resolve_baseline_model(
     baseline_model, baseline_display_name = _load_baseline_from_path(baseline_weights_path)
     if baseline_model is not None:
         return baseline_model, (baseline_display_name or "baseline")
+
+    if finetune_weights_path:
+        primary = Path(str(baseline_weights_path)).expanduser() if baseline_weights_path else None
+        secondary = Path(str(finetune_weights_path)).expanduser()
+        if primary is not None and not primary.is_absolute():
+            primary = Path.cwd() / primary
+        if not secondary.is_absolute():
+            secondary = Path.cwd() / secondary
+        if primary is None or str(primary) != str(secondary):
+            baseline_model, baseline_display_name = _load_baseline_from_path(finetune_weights_path)
+            if baseline_model is not None:
+                print(f"Using fine-tune weights as baseline: {finetune_weights_path}")
+                return baseline_model, (baseline_display_name or Path(finetune_weights_path).stem)
 
     baseline_checkpoint = str(fallback_checkpoint)
     print(f"\n{'='*70}")
@@ -1041,6 +1089,7 @@ def _evaluate_and_finalize(
     val_split: float,
     baseline_weights_path: str | None,
     fallback_checkpoint: str,
+    finetune_weights_path: str | None = None,
     params: dict | None = None,
 ) -> None:
     """Shared evaluation + output finalisation for every training backend.
@@ -1051,7 +1100,9 @@ def _evaluate_and_finalize(
     """
     # ── Resolve baseline model ──
     baseline_model, baseline_display_name = _resolve_baseline_model(
-        baseline_weights_path, fallback_checkpoint
+        baseline_weights_path,
+        fallback_checkpoint,
+        finetune_weights_path=finetune_weights_path,
     )
 
     # ── Evaluate baseline model on the test set ──

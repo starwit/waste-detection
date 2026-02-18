@@ -198,6 +198,120 @@ def test_pipeline_finetune_missing_weights_fails(stubbed_pipeline: StubYOLO):
         run_train_eval_stage(args)
 
 
+def test_pipeline_finetune_uses_finetune_weights_as_baseline_when_primary_missing(
+    stubbed_pipeline: StubYOLO,
+):
+    """If evaluation baseline is missing, finetune weights should be used for comparison."""
+
+    workspace = Path.cwd()
+    dataset_name = "e2e_dataset"
+    finetune_weights = workspace / "models" / "finetune" / "best.pt"
+    finetune_weights.parent.mkdir(parents=True, exist_ok=True)
+    finetune_weights.write_bytes(b"stub-finetune-weights")
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {"dataset_name": dataset_name},
+            "train": {
+                "finetune": {
+                    "enabled": True,
+                    "weights": str(finetune_weights),
+                    "epochs": 1,
+                },
+            },
+            "evaluation": {
+                "baseline_weights_path": "models/current_best/missing.pt",
+            },
+        },
+    )
+
+    args = build_args(dataset_name)
+    run_prepare_stage(args)
+    run_train_eval_stage(args)
+
+    _assert_results_exist(workspace, dataset_name)
+
+    # Training and baseline comparison both load the finetune weights.
+    assert StubYOLO.recorded_models.count(str(finetune_weights)) >= 2
+    # No official YOLO fallback should be needed in this path.
+    assert not any(model.startswith("yolov8") for model in StubYOLO.recorded_models)
+
+
+def test_pipeline_loads_rfdetr_baseline_from_metadata(
+    stubbed_pipeline: StubYOLO, monkeypatch: pytest.MonkeyPatch
+):
+    """A promoted RF-DETR baseline should be loaded via adapter (not YOLO fallback)."""
+
+    import numpy as np
+
+    workspace = Path.cwd()
+    dataset_name = "e2e_dataset"
+
+    baseline_dir = workspace / "models" / "current_best"
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    baseline_weights = baseline_dir / "best.pt"
+    baseline_weights.write_bytes(b"stub-rfdetr-checkpoint")
+    (baseline_dir / "metadata.yaml").write_text(
+        "\n".join(
+            [
+                "experiment_name: promoted-rfdetr",
+                "model_backend: rfdetr",
+                "model_variant: nano",
+                "image_size: 320",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {"dataset_name": dataset_name},
+            "evaluation": {"baseline_weights_path": str(baseline_weights)},
+        },
+    )
+
+    rfdetr_load_calls: list[dict[str, str]] = []
+
+    class _StubRFDETRBaseline:
+        def predict(self, img, threshold=0.5):
+            class _EmptyDets:
+                xyxy = np.empty((0, 4))
+                confidence = np.empty(0)
+                class_id = np.empty(0, dtype=int)
+
+                def __len__(self):
+                    return 0
+
+            return _EmptyDets()
+
+    def _fake_get_rfdetr_model(model_variant, pretrain_weights=None, device=None, gradient_checkpointing=None):
+        rfdetr_load_calls.append(
+            {
+                "variant": str(model_variant),
+                "weights": str(pretrain_weights),
+            }
+        )
+        return _StubRFDETRBaseline()
+
+    monkeypatch.setattr("yolov8_training.train_pipeline._get_rfdetr_model", _fake_get_rfdetr_model)
+
+    args = build_args(dataset_name)
+    run_prepare_stage(args)
+    run_train_eval_stage(args)
+
+    _assert_results_exist(workspace, dataset_name)
+    assert rfdetr_load_calls
+    assert rfdetr_load_calls[0]["variant"] == "nano"
+    assert rfdetr_load_calls[0]["weights"] == str(baseline_weights)
+    # One official YOLO load for training is expected; no extra fallback baseline load.
+    assert sum(1 for model in StubYOLO.recorded_models if model.startswith("yolov8")) == 1
+
+
 def test_pipeline_can_select_rfdetr_backend_via_params(
     stubbed_pipeline: StubYOLO, monkeypatch: pytest.MonkeyPatch
 ):
