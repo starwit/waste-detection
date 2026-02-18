@@ -620,7 +620,7 @@ def evaluate_merged_class_subsets(model, model_name, test_path, raw_test_path,
 
 
 def write_merged_class_results(output_dir, all_model_results):
-    """Write merged-class subset results to CSV and return formatted table.
+    """Write merged-class subset results to a CSV file.
 
     Args:
         output_dir: Directory to write ``merged_class_results.csv``.

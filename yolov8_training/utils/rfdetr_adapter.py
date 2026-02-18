@@ -377,7 +377,20 @@ def _parse_class_names(ds_cfg: dict) -> Dict[int, str]:
     names = ds_cfg.get("names", {})
     if isinstance(names, list):
         return {i: n for i, n in enumerate(names)}
-    return dict(names)
+    if isinstance(names, dict):
+        parsed: dict[int, str] = {}
+        for raw_key, raw_name in names.items():
+            try:
+                cls_id = int(raw_key)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"Invalid class id in dataset.yaml names mapping: {raw_key!r}. "
+                    "Expected integer keys (e.g. 0, 1, 2) or numeric strings (e.g. '0', '1')."
+                ) from e
+            parsed[cls_id] = str(raw_name)
+        # Ensure deterministic ordering by class id
+        return {k: parsed[k] for k in sorted(parsed)}
+    return {}
 
 
 def _compute_coco_metrics(

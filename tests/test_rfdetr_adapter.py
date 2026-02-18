@@ -189,3 +189,8 @@ def test_val_requires_dataset_yaml() -> None:
     adapter = adapter_mod.RFDETRModelAdapter(_StubRFDETR(dets))
     with pytest.raises(ValueError, match="data .* required"):
         adapter.val()
+
+
+def test_parse_class_names_coerces_string_keys_to_int() -> None:
+    class_names = adapter_mod._parse_class_names({"names": {"0": "waste", "1": "other"}})
+    assert class_names == {0: "waste", 1: "other"}
