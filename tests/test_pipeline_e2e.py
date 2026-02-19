@@ -36,6 +36,7 @@ def stubbed_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Replace YOLO constructors with the stub
     # Swap in the stub everywhere the pipeline imports YOLO so training/eval stays local.
     monkeypatch.setattr("yolov8_training.train_pipeline.YOLO", StubYOLO)
+    monkeypatch.setattr("yolov8_training.backends.yolo_backend.YOLO", StubYOLO)
     monkeypatch.setattr("yolov8_training.utils.evaluate.YOLO", StubYOLO)
 
     # Silence heavy post-processing during tests
@@ -311,7 +312,9 @@ def test_pipeline_loads_rfdetr_baseline_from_metadata(
         )
         return _StubRFDETRBaseline()
 
-    monkeypatch.setattr("yolov8_training.train_pipeline._get_rfdetr_model", _fake_get_rfdetr_model)
+    monkeypatch.setattr(
+        "yolov8_training.backends.rfdetr_backend._get_rfdetr_model", _fake_get_rfdetr_model
+    )
 
     args = build_args(dataset_name)
     run_prepare_stage(args)
@@ -408,9 +411,10 @@ def test_pipeline_can_select_rfdetr_backend_via_params(
         return _StubRFDETRModel(), output_dir
 
     monkeypatch.setattr(
-        "yolov8_training.train_pipeline._prepare_rfdetr_yolo_layout", _fake_prepare_yolo_layout
+        "yolov8_training.backends.rfdetr_backend._prepare_rfdetr_yolo_layout",
+        _fake_prepare_yolo_layout,
     )
-    monkeypatch.setattr("yolov8_training.train_pipeline.train_rfdetr", _fake_train_rfdetr)
+    monkeypatch.setattr("yolov8_training.backends.rfdetr_backend.train_rfdetr", _fake_train_rfdetr)
 
     run_train_eval_stage(args)
 

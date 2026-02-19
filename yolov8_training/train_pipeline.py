@@ -1,6 +1,5 @@
 import argparse
 import os
-import time
 import shutil
 import random
 import json
@@ -15,6 +14,8 @@ import numpy as np
 import torch
 import yaml
 from ultralytics import YOLO
+from yolov8_training.backends import rfdetr_backend, yolo_backend
+from yolov8_training.backends.yolo_backend import train_model
 from yolov8_training.utils.data_utils import (
     check_for_test_images,
     create_dataset_yaml,
@@ -25,7 +26,6 @@ from yolov8_training.utils.evaluate import (
     evaluate_and_log_model_results,
     evaluate_merged_class_subsets,
     generate_side_by_side_comparisons,
-    mean_table,
     write_merged_class_results,
 )
 from yolov8_training.utils.replay import build_or_update_replay_set
@@ -98,73 +98,6 @@ def load_folder_subset_config(params: dict | None = None):
         params = _load_params_yaml()
     return params.get("prepare", {}).get("folder_subsets", {})
 
-
-def _resolve_save_dir(model, results, default: Path) -> Path:
-    """Return Ultralytics' actual save_dir if available, else default.
-
-    Keeps train_model concise while handling version differences
-    (trainer.save_dir vs. results.save_dir).
-    """
-    try:
-        trainer = getattr(model, "trainer", None)
-        candidate = getattr(trainer, "save_dir", None) if trainer is not None else None
-        if candidate:
-            return Path(candidate)
-    except Exception:
-        pass
-
-    try:
-        candidate = getattr(results, "save_dir", None)
-        if candidate:
-            return Path(candidate)
-    except Exception:
-        pass
-
-    return default
-
-
-def _resolve_unique_run_dir(root: Path, run_name: str) -> Path:
-    """Return a unique directory path under root."""
-    candidate = root / run_name
-    if not candidate.exists():
-        return candidate
-    suffix = 1
-    while (root / f"{run_name}_{suffix}").exists():
-        suffix += 1
-    return root / f"{run_name}_{suffix}"
-
-
-def _rfdetr_resolution_divisor(model_variant: str) -> int:
-    """
-    RF-DETR requires resolution divisible by (patch_size * num_windows).
-    For the official variants:
-      - nano/small/medium: 16 * 2 = 32
-      - base/large: 14 * 4 = 56
-    """
-    variant = (model_variant or "").lower()
-    if variant in {"nano", "small", "medium"}:
-        return 32
-    if variant in {"base", "large"}:
-        return 56
-    return 56
-
-
-def _normalize_rfdetr_resolution(model_variant: str, resolution: int | None, fallback: int) -> int:
-    """Adjust resolution to satisfy RF-DETR constraints."""
-    if resolution is None:
-        resolution = int(fallback)
-    divisor = _rfdetr_resolution_divisor(model_variant)
-    if resolution % divisor != 0:
-        adjusted = (resolution // divisor) * divisor
-        if adjusted < divisor:
-            adjusted = divisor
-        print(
-            f"Warning: RF-DETR resolution {resolution} is not divisible by {divisor}. "
-            f"Using {adjusted}."
-        )
-        resolution = adjusted
-    return int(resolution)
-
 def _normalize_model_type(model_type: str | None) -> str:
     """
     Normalize user/config-supplied model type strings.
@@ -191,14 +124,6 @@ def _default_yolo_checkpoint(model_key: str) -> str:
     if key.endswith(".pt"):
         return key
     return f"{key}.pt"
-
-
-def _infer_rfdetr_variant(model_key: str) -> str:
-    key = str(model_key or "").strip().lower().replace("_", "-")
-    for prefix in ("rfdetr-", "rf-detr-"):
-        if key.startswith(prefix) and len(key) > len(prefix):
-            return key[len(prefix):]
-    return "base"
 
 
 def _first_yolo_fallback_checkpoint(models_cfg: dict) -> str | None:
@@ -287,7 +212,11 @@ def resolve_training_config(args, params: dict | None = None) -> dict:
             resolved["epochs"] = int(finetune_epochs)
         return resolved
 
-    rfdetr_variant = str(model_cfg.get("variant") or model_cfg.get("model") or _infer_rfdetr_variant(str(selected_model)))
+    rfdetr_variant = str(
+        model_cfg.get("variant")
+        or model_cfg.get("model")
+        or rfdetr_backend._infer_rfdetr_variant(str(selected_model))
+    )
     rfdetr_batch_size = int(model_cfg.get("batch_size", shared_batch_size))
     explicit_grad_accum = model_cfg.get("grad_accum_steps")
     target_effective_batch = int(model_cfg.get("target_effective_batch", 16))
@@ -296,7 +225,7 @@ def resolve_training_config(args, params: dict | None = None) -> dict:
     else:
         rfdetr_grad_accum = max(1, target_effective_batch // rfdetr_batch_size)
 
-    rfdetr_resolution = _normalize_rfdetr_resolution(
+    rfdetr_resolution = rfdetr_backend._normalize_rfdetr_resolution(
         rfdetr_variant,
         model_cfg.get("resolution", None),
         int(model_cfg.get("image_size", shared_image_size)),
@@ -318,179 +247,6 @@ def resolve_training_config(args, params: dict | None = None) -> dict:
         }
     )
     return resolved
-
-
-def _get_rfdetr_model(
-    model_variant: str,
-    pretrain_weights: str | None = None,
-    device: str | None = None,
-    gradient_checkpointing: bool | None = None,
-):
-    """Return an initialized RF-DETR model based on a variant name."""
-    try:
-        import rfdetr
-    except Exception as e:
-        raise RuntimeError(
-            "RF-DETR is not installed. Add it to your environment (see pyproject.toml)."
-        ) from e
-
-    variant = (model_variant or "base").lower()
-    class_name_by_variant = {
-        "nano": "RFDETRNano",
-        "small": "RFDETRSmall",
-        "medium": "RFDETRMedium",
-        "base": "RFDETRBase",
-        "large": "RFDETRLarge",
-    }
-    class_name = class_name_by_variant.get(variant)
-    if class_name is None:
-        raise ValueError(f"Unsupported RF-DETR model variant: {model_variant}")
-
-    model_cls = getattr(rfdetr, class_name, None)
-    if model_cls is None:
-        raise RuntimeError(
-            f"Your installed rfdetr package does not provide {class_name}. "
-            "Either choose another train.rfdetr.model or upgrade rfdetr."
-        )
-
-    init_kwargs: dict[str, object] = {}
-    if pretrain_weights:
-        init_kwargs["pretrain_weights"] = pretrain_weights
-    if device:
-        init_kwargs["device"] = device
-    if gradient_checkpointing is not None:
-        init_kwargs["gradient_checkpointing"] = bool(gradient_checkpointing)
-    return model_cls(**init_kwargs) if init_kwargs else model_cls()
-
-
-def train_rfdetr(
-    dataset_dir: Path,
-    output_root: Path,
-    experiment_name: str | None,
-    model_variant: str,
-    epochs: int,
-    batch_size: int,
-    grad_accum_steps: int,
-    lr: float | None,
-    resolution: int,
-    pretrain_weights: str | None = None,
-    gradient_checkpointing: bool | None = None,
-    extra_train_kwargs: dict | None = None,
-):
-    """Train an RF-DETR model using a Roboflow-style COCO dataset export."""
-    run_name = experiment_name or "rfdetr-train"
-    output_dir = _resolve_unique_run_dir(output_root, run_name)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = _get_rfdetr_model(
-        model_variant,
-        pretrain_weights=pretrain_weights,
-        device=device,
-        gradient_checkpointing=gradient_checkpointing,
-    )
-
-    train_kwargs: dict[str, object] = {
-        "dataset_dir": str(dataset_dir),
-        "dataset_file": "roboflow",
-        "epochs": int(epochs),
-        "batch_size": int(batch_size),
-        "grad_accum_steps": int(grad_accum_steps),
-        "output_dir": str(output_dir),
-        "resolution": int(resolution),
-        "run_test": True,
-    }
-    if lr is not None:
-        train_kwargs["lr"] = float(lr)
-    if extra_train_kwargs:
-        train_kwargs.update(extra_train_kwargs)
-
-    model.train(**train_kwargs)
-    return model, output_dir
-
-
-def _save_rfdetr_weights(output_dir: Path) -> None:
-    """Copy the best RF-DETR checkpoint into ``output_dir/weights/best.pt``.
-
-    This mirrors the YOLO convention so that ``export_baseline.py`` (which looks
-    for ``<run>/weights/best.pt``) works identically for both model families.
-    """
-    weights_dir = output_dir / "weights"
-    weights_dir.mkdir(parents=True, exist_ok=True)
-
-    # RF-DETR typically saves the best checkpoint as checkpoint_best_total.pth
-    candidates = [
-        output_dir / "checkpoint_best_total.pth",
-        output_dir / "checkpoint_best.pth",
-        output_dir / "best.pth",
-    ]
-    # Also check for any .pth file as a last resort
-    all_pth = sorted(output_dir.glob("*.pth"))
-
-    source = None
-    for c in candidates:
-        if c.exists() and c.stat().st_size > 0:
-            source = c
-            break
-    if source is None and all_pth:
-        # Pick the largest .pth file (likely the full checkpoint)
-        source = max(all_pth, key=lambda p: p.stat().st_size)
-
-    if source is not None:
-        dest = weights_dir / "best.pt"
-        shutil.copy2(source, dest)
-        print(f"RF-DETR best weights saved to {dest}")
-    else:
-        print("Warning: No RF-DETR checkpoint found to copy to weights/best.pt")
-
-
-def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_name: str) -> Path:
-    """Create a lightweight YOLO-format directory for RF-DETR.
-
-    RF-DETR 1.4+ auto-detects YOLO datasets when it finds ``data.yaml`` +
-    ``train/images/`` at the dataset root.  Our prepare stage produces a
-    slightly different layout (``val/`` instead of ``valid/``, separate
-    train/test roots, ``dataset.yaml`` instead of ``data.yaml``), so this
-    helper bridges the gap with three symlinks and one tiny YAML file.
-
-    This replaces the former ``export_coco_dataset_from_yolo`` step which
-    had to read every image with ``cv2.imread`` to extract dimensions and
-    then write COCO JSON annotation files — a process that could take
-    minutes for large datasets.  Symlinks are instant.
-    """
-    output_dir = Path(".tmp") / "rfdetr_datasets" / str(dataset_name)
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # RF-DETR expects train/, valid/, test/ under one root
-    (output_dir / "train").symlink_to((training_path / "train").resolve())
-    (output_dir / "valid").symlink_to((training_path / "val").resolve())
-    (output_dir / "test").symlink_to((test_path / "val").resolve())
-
-    # RF-DETR looks for data.yaml (not dataset.yaml)
-    src_yaml = training_path / "dataset.yaml"
-    with open(src_yaml, "r", encoding="utf-8") as f:
-        ds_cfg = yaml.safe_load(f) or {}
-
-    names_raw = ds_cfg.get("names", [])
-    if isinstance(names_raw, dict):
-        names_list = [names_raw[k] for k in sorted(names_raw.keys(), key=lambda x: int(x))]
-    else:
-        names_list = list(names_raw)
-
-    data_yaml = {
-        "names": names_list,
-        "nc": len(names_list),
-        "train": "train/images",
-        "val": "valid/images",
-        "test": "test/images",
-    }
-    with open(output_dir / "data.yaml", "w", encoding="utf-8") as f:
-        yaml.safe_dump(data_yaml, f, sort_keys=False)
-
-    return output_dir
-
 
 
 def _load_baseline_from_path(path_candidate: str | None) -> tuple[object | None, str | None]:
@@ -542,7 +298,7 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[object | None,
             resolution = int(meta.get("image_size", 640) or 640)
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            rfdetr_model = _get_rfdetr_model(
+            rfdetr_model = rfdetr_backend._get_rfdetr_model(
                 model_variant=model_variant,
                 pretrain_weights=str(candidate_path),
                 device=device,
@@ -567,122 +323,6 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[object | None,
         return None, None
 
     return model_instance, str(display_name)
-
-def train_model(
-    dataset_path, checkpoint, image_size, batch_size, experiment_name, epochs=100,
-    finetune_mode=False, pretrained_model_path=None, finetune_lr=None, freeze_backbone=False,
-    single_phase_overrides: dict | None = None,
-):
-    """
-    Train the YOLO model on the specified dataset.
-
-    Args:
-        dataset_path (Path): Path to the dataset directory.
-        checkpoint (str): YOLO checkpoint to train from (e.g., 'yolov8m.pt').
-        image_size (int): Size of images for training.
-        batch_size (int): Batch size for training.
-        experiment_name (str): Name for the experiment.
-        epochs (int): Number of training epochs.
-        finetune_mode (bool): Whether to use fine-tuning mode.
-        pretrained_model_path (str): Path to pre-trained model for fine-tuning.
-        finetune_lr (float): Learning rate for fine-tuning.
-        freeze_backbone (bool): Whether to freeze backbone layers during fine-tuning.
-
-    Returns:
-        model (YOLO): The trained YOLO model.
-        results: Training results.
-        Path: Directory path of the training output.
-    """
-    # Choose model based on fine-tuning mode
-    pretrained_model = None
-    if pretrained_model_path:
-        candidate = Path(pretrained_model_path)
-        if not candidate.is_absolute():
-            candidate = Path.cwd() / candidate
-        if candidate.exists() and candidate.stat().st_size > 0:
-            pretrained_model = candidate
-
-    if finetune_mode:
-        if not pretrained_model_path:
-            raise ValueError(
-                "Fine-tuning mode is enabled, but train.finetune.weights is not set."
-            )
-        if pretrained_model is None:
-            raise FileNotFoundError(
-                f"Fine-tuning mode is enabled, but weights were not found or are empty: "
-                f"{pretrained_model_path}"
-            )
-        print(f"Fine-tuning mode enabled. Loading pre-trained model: {pretrained_model_path}")
-        model = YOLO(str(pretrained_model))
-        experiment_name = f"{experiment_name}-finetune"
-    else:
-        checkpoint_name = str(checkpoint)
-        print(f"Using YOLO checkpoint: {checkpoint_name}")
-        try:
-            model = YOLO(checkpoint_name)
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to initialize training. "
-                f"Tried to load official checkpoint '{checkpoint_name}' but it could not be "
-                "downloaded or loaded. Ensure network access or provide a valid local checkpoint "
-                "in models.<selected>.checkpoint."
-            ) from e
-    
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-
-    # Define project name and ensure unique run name
-    project = "runs"
-    name = None
-    if experiment_name:
-        base_name = experiment_name
-        name = base_name
-        run_number = 1
-        while (Path(project) / name).exists():
-            name = f"{base_name}_{run_number}"
-            run_number += 1
-
-    # Prepare training arguments
-    train_args = {
-        "data": str(dataset_path / "dataset.yaml"),
-        "epochs": epochs,
-        "imgsz": image_size,
-        "batch": batch_size,
-        "device": device,
-        "workers": 4,
-        "amp": True,
-        "project": project,
-    }
-    if name:
-        train_args["name"] = name
-    
-    # Two-phase path removed for simplicity; single-phase fine-tune only
-
-    # Single-phase (original) path
-    if finetune_mode:
-        if finetune_lr is not None:
-            train_args["lr0"] = finetune_lr
-            print(f"Using fine-tuning learning rate: {finetune_lr}")
-
-        if freeze_backbone:
-            # Freeze backbone layers (layers 0-9 typically for YOLOv8)
-            train_args["freeze"] = list(range(10))
-            print("Freezing backbone layers for fine-tuning")
-
-        # Allow minimal, explicit overrides (optimizer, mosaic, mixup, close_mosaic, cos_lr, lrf, patience)
-        if single_phase_overrides:
-            sp = {k: v for k, v in single_phase_overrides.items() if v is not None}
-            if sp:
-                print(f"Applying single-phase overrides: {sorted(sp.keys())}")
-                train_args.update(sp)
-
-    results = model.train(**train_args)
-
-    default_dir = Path(project) / (name if name else "train")
-    output_dir = _resolve_save_dir(model, results, default_dir)
-
-    # Keep return signature compatible with tests: (model, results, output_dir)
-    return model, results, output_dir
 
 
 def process_data(
@@ -897,80 +537,15 @@ def run_train_eval_stage(args):
     test_path = dataset_path / "test"
 
     if resolved_cfg["backend"] == "rfdetr":
-        from yolov8_training.utils.rfdetr_adapter import RFDETRModelAdapter
-
-        rfdetr_variant = resolved_cfg["rfdetr_variant"]
-        rfdetr_epochs = int(resolved_cfg["rfdetr_epochs"])
-        rfdetr_batch_size = int(resolved_cfg["rfdetr_batch_size"])
-        rfdetr_grad_accum = int(resolved_cfg["rfdetr_grad_accum"])
-        if not resolved_cfg.get("rfdetr_grad_accum_explicit", False):
-            print(
-                f"RF-DETR: auto-computed grad_accum_steps={rfdetr_grad_accum} "
-                f"(target_effective_batch={resolved_cfg['rfdetr_target_effective_batch']} / batch_size={rfdetr_batch_size})"
+        model, train_output_dir, display_name, image_size, train_epochs = (
+            rfdetr_backend.train_rfdetr_backend(
+                training_path=training_path,
+                test_path=test_path,
+                dataset_name=str(dataset_name),
+                resolved_cfg=resolved_cfg,
+                experiment_name=experiment_name,
             )
-
-        rfdetr_lr = resolved_cfg.get("rfdetr_lr")
-        rfdetr_resolution = int(resolved_cfg["rfdetr_resolution"])
-        rfdetr_pretrain = resolved_cfg.get("rfdetr_pretrain")
-        rfdetr_grad_ckpt = resolved_cfg.get("rfdetr_grad_ckpt")
-        rfdetr_extra = resolved_cfg.get("rfdetr_extra")
-
-        # Prepare a lightweight YOLO-format directory layout for RF-DETR.
-        # RF-DETR 1.4+ auto-detects YOLO format (data.yaml + train/images/).
-        # This replaces the old COCO export step — symlinks instead of copying.
-        rfdetr_export_dir = _prepare_rfdetr_yolo_layout(
-            training_path=training_path,
-            test_path=test_path,
-            dataset_name=str(dataset_name),
         )
-        rfdetr_dataset_dir = rfdetr_export_dir
-
-        runs_root = Path("runs") / "rfdetr"
-        runs_root.mkdir(parents=True, exist_ok=True)
-        display_name = f"{(experiment_name or resolved_cfg['model_key'])}-rfdetr-{rfdetr_variant}"
-
-        rfdetr_model, train_output_dir = train_rfdetr(
-            dataset_dir=rfdetr_dataset_dir,
-            output_root=runs_root,
-            experiment_name=display_name,
-            model_variant=rfdetr_variant,
-            epochs=rfdetr_epochs,
-            batch_size=rfdetr_batch_size,
-            grad_accum_steps=rfdetr_grad_accum,
-            lr=float(rfdetr_lr) if rfdetr_lr is not None else None,
-            resolution=rfdetr_resolution,
-            pretrain_weights=str(rfdetr_pretrain) if rfdetr_pretrain is not None else None,
-            gradient_checkpointing=rfdetr_grad_ckpt,
-            extra_train_kwargs=rfdetr_extra if isinstance(rfdetr_extra, dict) else None,
-        )
-
-        # ── Save weights in the same layout as YOLO (weights/best.pt) ──
-        _save_rfdetr_weights(train_output_dir)
-
-        # ── Read class names from the dataset for the adapter ──
-        from yolov8_training.utils.evaluate import get_dataset_classes
-        test_yaml = test_path / "dataset.yaml"
-        class_names_map, _ = get_dataset_classes(test_yaml)
-
-        # ── Wrap in adapter so evaluate.py treats it like a YOLO model ──
-        model = RFDETRModelAdapter(
-            rfdetr_model,
-            model_name=display_name,
-            resolution=rfdetr_resolution,
-            class_names=class_names_map,
-            model_variant=rfdetr_variant,
-        )
-
-        # ── Clean up temporary YOLO layout (not needed after training) ──
-        tmp_root = Path(".tmp")
-        if rfdetr_export_dir.exists():
-            shutil.rmtree(rfdetr_export_dir, ignore_errors=True)
-        # Remove empty parent dirs (.tmp/rfdetr_datasets/, .tmp/) if nothing else uses them
-        for parent in (rfdetr_export_dir.parent, tmp_root):
-            try:
-                parent.rmdir()  # only succeeds if empty
-            except (OSError, FileNotFoundError):
-                pass
 
         # ── Evaluate & finalize (shared with YOLO path) ──
         _evaluate_and_finalize(
@@ -979,8 +554,8 @@ def run_train_eval_stage(args):
             train_output_dir=train_output_dir,
             test_path=test_path,
             training_path=training_path,
-            image_size=rfdetr_resolution,
-            train_epochs=rfdetr_epochs,
+            image_size=image_size,
+            train_epochs=train_epochs,
             val_split=val_split,
             baseline_weights_path=resolved_cfg.get("baseline_weights_path"),
             fallback_checkpoint=resolved_cfg["fallback_checkpoint"],
@@ -988,31 +563,10 @@ def run_train_eval_stage(args):
         )
         return
 
-    # Train the model
-    model, results, train_output_dir = train_model(
-        training_path,
-        resolved_cfg["checkpoint"],
-        int(resolved_cfg["image_size"]),
-        int(resolved_cfg["batch_size"]),
-        experiment_name,
-        epochs=int(resolved_cfg["epochs"]),
-        finetune_mode=bool(resolved_cfg.get("finetune_mode", False)),
-        pretrained_model_path=resolved_cfg.get("pretrained_model_path"),
-        finetune_lr=resolved_cfg.get("finetune_lr"),
-        freeze_backbone=bool(resolved_cfg.get("freeze_backbone", False)),
-        single_phase_overrides=resolved_cfg.get("single_phase_overrides"),
-    )
-
-    # Determine the final experiment display name (append suffix in finetune mode)
-    final_experiment_name = (
-        (
-            f"{experiment_name}-finetune"
-            if experiment_name
-            and bool(resolved_cfg.get("finetune_mode", False))
-            and resolved_cfg.get("pretrained_model_path")
-            and Path(str(resolved_cfg.get("pretrained_model_path"))).exists()
-            else experiment_name
-        )
+    model, _results, train_output_dir, final_experiment_name = yolo_backend.train_yolo(
+        training_path=training_path,
+        resolved_cfg=resolved_cfg,
+        experiment_name=experiment_name,
     )
 
     # ── Evaluate & finalize (shared with RF-DETR path) ──
