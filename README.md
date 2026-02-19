@@ -110,24 +110,17 @@ models:
     backend: rfdetr
     variant: medium           # nano | small | medium | base | large
     resolution: 1280          # must be divisible by 32 (nano/small/medium) or 56 (base/large)
-    epochs: 150               # override shared default — set high, early_stopping decides
+    epochs: 150               # override shared default
     batch_size: 2
     target_effective_batch: 16  # grad_accum_steps auto-computed: 16 // 2 = 8
     # grad_accum_steps: 8     # uncomment to override auto-computation
     lr: 0.0001                # decoder LR; lr_encoder is handled internally
     gradient_checkpointing: false
-    extra_train_kwargs:
-      num_workers: 4
-      multi_scale: true       # RF-DETR default — critical for generalisation
-      expanded_scales: true   # RF-DETR default — extends scale augmentation range
-      lr_drop: 120
-      warmup_epochs: 1.0
-      early_stopping: true
-      early_stopping_patience: 15
-      early_stopping_min_delta: 0.001
+    # extra_train_kwargs: {}  # optional (see params.yaml for a full example)
 ```
 
 Model-specific keys (`epochs`, `batch_size`, `resolution`, etc.) override the shared defaults in `train`.
+For advanced RF-DETR knobs (multi-scale, early stopping, etc.) use `models.<key>.extra_train_kwargs` in `params.yaml`.
 
 When RF-DETR is selected the pipeline:
 1. Creates a lightweight YOLO-format directory with symlinks (`train/`, `valid/`, `test/` + `data.yaml`) — instant, no file copying (RF-DETR 1.4+ auto-detects this format)
