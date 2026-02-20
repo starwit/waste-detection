@@ -230,11 +230,6 @@ def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_na
     slightly different layout (``val/`` instead of ``valid/``, separate
     train/test roots, ``dataset.yaml`` instead of ``data.yaml``), so this
     helper bridges the gap with three symlinks and one tiny YAML file.
-
-    This replaces the former ``export_coco_dataset_from_yolo`` step which
-    had to read every image with ``cv2.imread`` to extract dimensions and
-    then write COCO JSON annotation files — a process that could take
-    minutes for large datasets.  Symlinks are instant.
     """
     base_dir = Path(".tmp") / "rfdetr_datasets"
     output_dir = base_dir / _safe_dataset_dirname(str(dataset_name))
@@ -305,7 +300,6 @@ def train_rfdetr_backend(
 
     # Prepare a lightweight YOLO-format directory layout for RF-DETR.
     # RF-DETR 1.4+ auto-detects YOLO format (data.yaml + train/images/).
-    # This replaces the old COCO export step — symlinks instead of copying.
     rfdetr_export_dir = _prepare_rfdetr_yolo_layout(
         training_path=training_path,
         test_path=test_path,

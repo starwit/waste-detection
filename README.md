@@ -1,40 +1,31 @@
-# Waste Detection — Multi-Backend Object Detection + DVC
+# Waste Detection — YOLO + RF-DETR + DVC
 
-This repository is a focused fork of our object-detection retraining template, specialized for detecting waste on streets. It supports **multiple detection backends** — all Ultralytics YOLO versions as well as RF-DETR — with a unified DVC-managed pipeline for reproducible experiments and easy collaboration.
-
-### Supported Backends
-
-| Backend | Config value (`models.<key>.backend`) | Models |
-|---------|---------------------------------------|--------|
-| **Ultralytics YOLO** | `yolo` | Any checkpoint supported by `ultralytics` |
-| **RF-DETR** | `rfdetr` | Nano, Small, Medium, Base, Large |
-
-Switching between backends is a one-line change in `params.yaml` (`train.model`). The evaluation pipeline, baseline comparisons, side-by-side visualisations, and DVC tracking work identically for all backends.
+This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
+The training pipeline supports both Ultralytics YOLO and RF-DETR backends.
 
 ### Why DVC here?
 
 - **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.
 - **Reproducibility:** The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
 
+
 > About this fork
 > - Task: waste detection
-> - Current classes (from `params.yaml`): configurable (e.g. `waste`, `cigarette`, `leaves_dense`, `leaves_sparse`)
-> - Pipeline: Ultralytics YOLO *or* RF-DETR, selected via `train.model` in `params.yaml`
-
+> - Current classes (from params.yaml): `waste`, `cigarette`, `leaves_dense`, `leaves_sparse` (to keep it focused for now and not introduce too many classes while we don't have much training data)
+> - Pipeline: Ultralytics YOLO and RF-DETR with DVC-managed data and outputs
 ---
 
 ## Table of Contents
 1. [Models & Releases](#models--releases)
-2. [Selecting a Training Backend](#selecting-a-training-backend)
-3. [Initial Project Setup](#initial-project-setup)
-4. [Managing Project Data](#managing-project-data)
-5. [Experiment Workflow](#experiment-workflow)
-6. [Custom Classes](#custom-classes)
-7. [Class Mapping](#class-mapping)
-8. [Raw Data Structure](#raw-data-structure)
-9. [Fine-tuning](#fine-tuning)
-10. [Folder Subsets](#folder-subsets)
-11. [Testing](#testing)
+2. [Initial Project Setup](#initial-project-setup)
+3. [Managing Project Data](#managing-project-data)
+4. [Experiment Workflow](#experiment-workflow)
+5. [Custom Classes](#custom-classes)
+6. [Class Mapping](#class-mapping)
+7. [Raw Data Structure](#raw-data-structure)
+8. [Fine-tuning](#fine-tuning)
+9. [Folder Subsets](#folder-subsets)
+10. [Testing](#testing)
 
 ---
 
@@ -43,8 +34,8 @@ Switching between backends is a one-line change in `params.yaml` (`train.model`)
 This repo publishes trained models with each GitHub Release and also tracks the currently applied model via DVC.
 
 - Latest model (main): The model currently applied on the main branch is the one referenced in `dvc.lock` under the `runs/` output. To fetch it locally, run `dvc pull` (requires access to the configured DVC remote).
-- Release assets: Each release includes the trained weights and metadata so you don't need DVC to use the model:
-  - `weights/best.pt`: the promoted weights for inference (YOLO `.pt` or RF-DETR checkpoint copied to this path)
+- Release assets: Each release includes the trained weights and metadata so you don’t need DVC to use the model:
+  - `weights/best.pt`: the promoted weights for inference
   - `test_metrics.json`: evaluation metrics of the promoted run
   - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
 
@@ -53,15 +44,16 @@ This repo publishes trained models with each GitHub Release and also tracks the 
 The training pipeline loads a baseline model for comparison during evaluation:
 
 - **First tries:** `evaluation.baseline_weights_path` from params.yaml (defaults to `models/current_best/best.pt`)
+- **Then tries:** Fine-tune weights if in finetune mode
 - **Falls back to:** Official YOLO COCO checkpoint (always works, even on fresh clones)
 
 When you want to make a freshly trained run the new comparison baseline:
 
-1. Export the run's best weights (and optional metadata) into `models/current_best/`:
+1. Export the run’s best weights (and optional metadata) into `models/current_best/`:
    ```bash
    python yolov8_training/utils/export_baseline.py --run-dir runs/<experiment_name>
    ```
-   This works for both YOLO and RF-DETR runs — the RF-DETR path copies its best checkpoint into the same `weights/best.pt` layout.
+   You can override the weights or metadata paths via CLI flags if needed.
 2. Track the updated files with DVC so others can fetch them:
    ```bash
    dvc add models/current_best/best.pt models/current_best/metadata.yaml
@@ -69,75 +61,6 @@ When you want to make a freshly trained run the new comparison baseline:
    ```
 
 After these steps, subsequent training runs will compare against the newly exported baseline automatically.
-
----
-
-## Selecting a Training Backend
-
-All models are defined in the `models` section of `params.yaml`. Set `train.model` to the key of the model you want to train. All other pipeline stages (data preparation, evaluation, baseline comparison, output organisation) are shared and work identically for both backends.
-
-### YOLO
-
-```yaml
-train:
-  model: yolo11m           # key from models.* below
-  image_size: 1280
-  epochs: 100
-  batch_size: 8
-
-models:
-  yolo11m:
-    backend: yolo
-    checkpoint: yolo11m.pt  # any Ultralytics-compatible checkpoint
-  yolov8m:
-    backend: yolo
-    checkpoint: yolov8m.pt
-```
-
-Any Ultralytics-compatible checkpoint works — just add a new entry under `models`.
-
-### RF-DETR
-
-```yaml
-train:
-  model: rfdetr-medium      # key from models.* below
-  image_size: 1280
-  epochs: 150
-  batch_size: 2
-
-models:
-  rfdetr-medium:
-    backend: rfdetr
-    variant: medium           # nano | small | medium | base | large
-    resolution: 1280          # must be divisible by 32 (nano/small/medium) or 56 (base/large)
-    epochs: 150               # override shared default
-    batch_size: 2
-    target_effective_batch: 16  # grad_accum_steps auto-computed: 16 // 2 = 8
-    # grad_accum_steps: 8     # uncomment to override auto-computation
-    lr: 0.0001                # decoder LR; lr_encoder is handled internally
-    gradient_checkpointing: false
-    # extra_train_kwargs: {}  # optional (see params.yaml for a full example)
-```
-
-Model-specific keys (`epochs`, `batch_size`, `resolution`, etc.) override the shared defaults in `train`.
-For advanced RF-DETR knobs (multi-scale, early stopping, etc.) use `models.<key>.extra_train_kwargs` in `params.yaml`.
-
-When RF-DETR is selected the pipeline:
-1. Creates a lightweight YOLO-format directory with symlinks (`train/`, `valid/`, `test/` + `data.yaml`) — instant, no file copying (RF-DETR 1.4+ auto-detects this format)
-2. Trains the RF-DETR model with auto-computed gradient accumulation
-3. Copies the best checkpoint to `weights/best.pt` (same layout as YOLO)
-4. Wraps the model in an adapter (`RFDETRModelAdapter`) so that evaluation, side-by-side comparisons, and metrics export work identically
-5. Cleans up the temporary symlink directory
-
-### Quick switch via CLI
-
-```bash
-# Train with RF-DETR without editing params.yaml
-dvc exp run -n "rfdetr-test" -S train.model=rfdetr-medium
-
-# Train with a different YOLO family
-dvc exp run -n "yolo11-test" -S train.model=yolo11m
-```
 
 
 ## Initial Project Setup
@@ -159,7 +82,7 @@ Follow these steps once after creating this project from the template.
 
 **4. Run the Interactive Setup Script**
 
-A helper script configures the project's connection to remote storage and (optionally) custom classes.
+A helper script configures the project’s connection to remote storage and (optionally) custom classes.
 
 ```bash
 python setup_project.py
@@ -217,7 +140,7 @@ After the initial setup, follow this process whenever you add or update the raw 
 
 ## Experiment Workflow
 
-This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history. The workflow is identical for all backends (YOLO, RF-DETR).
+This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
 
 ### 1  Configure Parameters
 
@@ -236,7 +159,7 @@ data:
   use_coco_classes: false     # fallback to COCO if true/empty
 
 train:
-  model: yolo11m             # key from models.* section
+  model: yolo11m            # key from models.* below
   image_size: 1280
   epochs: 50
   batch_size: 8
@@ -252,7 +175,7 @@ models:
 ```
 
 * If `custom_classes` is non-empty, those names become class 0…n-1.  
-* If it's empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
+* If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
 
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
@@ -373,7 +296,7 @@ For detailed documentation, see [`docs/CLASS_MAPPING.md`](docs/CLASS_MAPPING.md)
 
 ## Testing
 
-This project includes unit tests, a lightweight E2E smoke suite, and an opt-in heavy integration suite.
+This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
 
 - Using unittest
   - Run all tests:
@@ -386,30 +309,20 @@ This project includes unit tests, a lightweight E2E smoke suite, and an opt-in h
     ```bash
     poetry install --with dev
     ```
-  - Run default tests:
+  - Run tests:
     ```bash
     poetry run pytest -q
     ```
-    - This skips tests marked `heavy`.
-  - Run heavy integration tests:
-    ```bash
-    poetry run pytest -q --heavy
-    ```
-    - This includes real-backend training checks and DVC repro integration checks.
 
 Notes
-- The standard E2E smoke test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
-- Smoke tests use stubs to keep results deterministic and CI-friendly.
-- The RF-DETR backend path is covered by a dedicated E2E test (`test_pipeline_can_select_rfdetr_backend_via_params`) that verifies training, evaluation, weight saving, and metrics export using a lightweight stub.
-- Heavy tests include real YOLO/RF-DETR one-epoch backend runs and DVC stage reproducibility checks.
-- Heavy tests are opt-in because they are integration-level, more environment-sensitive, and may be slower.
-- Real-backend heavy tests require local checkpoint files (`yolov8n.pt`, `rf-detr-nano.pth`).
+- The E2E test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
+- Tests run on CPU with a minimal YOLOv8n configuration and a single epoch to keep runtime low.
 
 ---
 
 ## Raw Data Structure
 
-Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).
+Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
 The importer now accepts **any** of the following:
 
 | # | Layout | What to do | Notes |
@@ -419,7 +332,7 @@ The importer now accepts **any** of the following:
 | 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
 | 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
 
-> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs "as is".
+> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
 > The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
 
 Example scene‑based layout:
@@ -444,11 +357,11 @@ Configure in `params.yaml` under `train.finetune`:
 ```yaml
 train:
   finetune:
-    enabled: true
+    enabled: true                  # enable fine-tuning
     weights: taco-uav-model.pt
-    lr: 0.0001
-    epochs: 60
-    freeze_backbone: false
+    lr: 0.0001                     # lower LR for fine-tuning
+    epochs: 60                     # optional override for epochs
+    freeze_backbone: false         # optionally freeze early layers
 ```
 
 Notes:
@@ -485,4 +398,4 @@ python yolov8_training/train_pipeline.py \
 
 Behavior:
 - Ratios between 0 and 1.0 subsample a folder.
-- Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn't leak duplicates between sources.
+- Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn’t leak duplicates between sources.
