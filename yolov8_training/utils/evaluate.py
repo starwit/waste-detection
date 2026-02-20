@@ -258,7 +258,7 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     if class_ids is not None:
         validation_kwargs["classes"] = class_ids
 
-    # Default to latency-style evaluation (batch=1) so ms/frame is comparable
+    # Default to latency-style evaluation (batch=1) so ms_per_frame is comparable
     # across backends (Ultralytics YOLO vs RF-DETR adapter).
     validation_kwargs.setdefault("batch", 1)
     
@@ -299,53 +299,8 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
         "map50": map50,
         "fitness": fitness,
         "f1_score": f1_score,
-        "ms/frame": ms_per_frame,
+        "ms_per_frame": ms_per_frame,
     }
-
-    # Optional FP16 metrics + timing (more deployment-like).
-    # Best-effort: if CUDA/half precision is unavailable, skip and keep FP32 metrics.
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            fp16_kwargs = validation_kwargs.copy()
-            fp16_kwargs["half"] = True
-            fp16_metrics = model.val(
-                data=data, verbose=False, save=False, plots=False, **fp16_kwargs
-            )
-
-            fp16_spd = fp16_metrics.speed
-            fp16_ms_per_frame = (
-                float(fp16_spd.get("preprocess", 0.0))
-                + float(fp16_spd.get("inference", 0.0))
-                + float(fp16_spd.get("postprocess", 0.0))
-            )
-
-            fp16_precision = float(fp16_metrics.results_dict["metrics/precision(B)"])
-            fp16_recall = float(fp16_metrics.results_dict["metrics/recall(B)"])
-            fp16_map50 = float(fp16_metrics.results_dict["metrics/mAP50(B)"])
-            fp16_map50_95 = float(fp16_metrics.results_dict["metrics/mAP50-95(B)"])
-            fp16_fitness = float(fp16_metrics.fitness)
-
-            fp16_f1_score = (
-                2 * (fp16_precision * fp16_recall) / (fp16_precision + fp16_recall)
-                if (fp16_precision + fp16_recall) > 0
-                else 0
-            )
-
-            metrics_dict.update(
-                {
-                    "precision_fp16": fp16_precision,
-                    "recall_fp16": fp16_recall,
-                    "map_fp16": fp16_map50_95,
-                    "map50_fp16": fp16_map50,
-                    "fitness_fp16": fp16_fitness,
-                    "f1_score_fp16": fp16_f1_score,
-                    "ms/frame_fp16": fp16_ms_per_frame,
-                }
-            )
-    except Exception as e:
-        print(f"Warning: Could not compute FP16 eval metrics: {e}")
 
     # Extract per-class metrics
     per_class = _extract_per_class_metrics(metrics, data)
@@ -781,14 +736,7 @@ def append_results_to_csv(train_output_dir, results, metadata, is_original=False
             "map50":     results["map50"],
             "fitness":   results["fitness"],
             "f1_score":  results["f1_score"],
-            "ms/frame":  results["ms/frame"],
-            "precision_fp16": results.get("precision_fp16", "-"),
-            "recall_fp16": results.get("recall_fp16", "-"),
-            "map_fp16": results.get("map_fp16", "-"),
-            "map50_fp16": results.get("map50_fp16", "-"),
-            "fitness_fp16": results.get("fitness_fp16", "-"),
-            "f1_score_fp16": results.get("f1_score_fp16", "-"),
-            "ms/frame_fp16": results.get("ms/frame_fp16", "-"),
+            "ms_per_frame": results["ms_per_frame"],
             "val_split": metadata["split_parameters"]["val_split"],
         }
     # Add scene-specific fitness values
@@ -906,7 +854,7 @@ def create_formatted_table(csv_path):
 
         if not column_values:
             best_values[header] = None
-        elif header in {"ms/frame", "ms/frame_fp16"}:  # Lower is better for time
+        elif header == "ms_per_frame":  # Lower is better for time
             best_values[header] = min(column_values)
         else:  # Higher is better for other metrics
             best_values[header] = max(column_values)
@@ -946,14 +894,7 @@ def create_formatted_table(csv_path):
         "map50 (higher is better): Mean Average Precision at IoU threshold 0.5.",
         "fitness (higher is better): Combined metric (0.1*mAP50 + 0.9*mAP50-95).",
         "f1_score (higher is better): Harmonic mean of precision and recall.",
-        "ms/frame (lower is better): Average inference time per frame in milliseconds (preprocess + inference + postprocess).",
-        "precision_fp16 (higher is better): Precision evaluated in FP16 (if available).",
-        "recall_fp16 (higher is better): Recall evaluated in FP16 (if available).",
-        "map_fp16 (higher is better): Mean Average Precision (IoU 0.5-0.95) evaluated in FP16 (if available).",
-        "map50_fp16 (higher is better): Mean Average Precision @ IoU 0.5 evaluated in FP16 (if available).",
-        "fitness_fp16 (higher is better): Fitness evaluated in FP16 (if available).",
-        "f1_score_fp16 (higher is better): F1 score evaluated in FP16 (if available).",
-        "ms/frame_fp16 (lower is better): FP16 average per-frame latency in milliseconds (if available).",
+        "ms_per_frame (lower is better): Average time per frame in milliseconds (preprocess + inference + postprocess).",
     ]
 
     # Add scene metric descriptions
@@ -1077,14 +1018,7 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
         "map50",
         "fitness",
         "f1_score",
-        "ms/frame",
-        "precision_fp16",
-        "recall_fp16",
-        "map_fp16",
-        "map50_fp16",
-        "fitness_fp16",
-        "f1_score_fp16",
-        "ms/frame_fp16",
+        "ms_per_frame",
 ]
 
     # Add scene metrics columns

@@ -35,7 +35,7 @@ class StubBox:
 
 class StubValMetrics:
     def __init__(self):
-        # Full speed dict required: validate_model() now computes ms/frame as
+        # Full speed dict required: validate_model() now computes ms_per_frame as
         # preprocess + inference + postprocess (previously only inference was used).
         self.speed = {"preprocess": 0.5, "inference": 1.0, "postprocess": 0.3}
         self.results_dict = {

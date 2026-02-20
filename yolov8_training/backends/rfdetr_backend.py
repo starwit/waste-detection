@@ -215,6 +215,15 @@ def _save_rfdetr_weights(output_dir: Path) -> None:
         print("Warning: No RF-DETR checkpoint found to copy to weights/best.pt")
 
 
+def _safe_dataset_dirname(dataset_name: str) -> str:
+    """Return a filesystem-safe single path component for a dataset name."""
+    raw = str(dataset_name or "").strip()
+    raw = Path(raw).name  # drop any path components (prevents traversal/absolute paths)
+    safe = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in raw)
+    safe = safe.strip("_-")
+    return safe or "dataset"
+
+
 def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_name: str) -> Path:
     """Create a lightweight YOLO-format directory for RF-DETR.
 
@@ -229,7 +238,11 @@ def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_na
     then write COCO JSON annotation files — a process that could take
     minutes for large datasets.  Symlinks are instant.
     """
-    output_dir = Path(".tmp") / "rfdetr_datasets" / str(dataset_name)
+    base_dir = Path(".tmp") / "rfdetr_datasets"
+    output_dir = base_dir / _safe_dataset_dirname(str(dataset_name))
+    # Defensive check: ensure output_dir cannot escape base_dir.
+    if not output_dir.resolve(strict=False).is_relative_to(base_dir.resolve(strict=False)):
+        raise ValueError(f"Unsafe dataset_name for RF-DETR export dir: {dataset_name!r}")
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
