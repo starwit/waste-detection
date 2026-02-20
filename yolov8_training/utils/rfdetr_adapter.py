@@ -24,6 +24,7 @@ from typing import Any, Dict
 
 import cv2
 import numpy as np
+import torch
 import yaml
 
 
@@ -146,7 +147,9 @@ class RFDETRModelAdapter:
         self.model_name = model_name
         self.model_backend = "rfdetr"
         self.model_variant = str(model_variant).lower() if model_variant else None
-        self._resolution = resolution
+        self._resolution = int(resolution)
+        # Public attr so shared tooling can read the effective eval resolution.
+        self.resolution = int(resolution)
         self._class_names = class_names or {}
         # The adapter also needs to look like it has a `model` attr (see train_model code).
         self.model = type("_Stub", (), {"yaml": {"model_name": model_name}})()
@@ -175,7 +178,13 @@ class RFDETRModelAdapter:
         else:
             img = source
 
-        detections = self._model.predict(img, threshold=conf)
+        # RF-DETR expects RGB channel order. OpenCV loads images in BGR.
+        img_rgb = (
+            cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            if img.ndim == 3 and img.shape[2] == 3
+            else img
+        )
+        detections = self._model.predict(img_rgb, threshold=conf)
         return [self._wrap_detections(detections, img)]
 
     def _wrap_detections(
@@ -238,6 +247,20 @@ class RFDETRModelAdapter:
         if data is None:
             raise ValueError("data (path to dataset.yaml) is required for val()")
 
+        imgsz = kwargs.get("imgsz")
+        if imgsz is not None:
+            try:
+                imgsz_int = int(imgsz)
+            except (TypeError, ValueError):
+                imgsz_int = None
+            if imgsz_int is not None and imgsz_int != int(self._resolution):
+                # RF-DETR always resizes to its configured resolution; it cannot
+                # honor per-call imgsz the way Ultralytics does.
+                print(
+                    f"Warning: RF-DETR adapter ignores imgsz={imgsz_int}; "
+                    f"using resolution={self._resolution}."
+                )
+
         ds_cfg = _load_dataset_yaml(data)
         dataset_path = Path(ds_cfg["path"])
         val_rel = ds_cfg.get("val", "val/images")
@@ -260,82 +283,111 @@ class RFDETRModelAdapter:
         image_id = 0
         total_inference_ms = 0.0
 
+        use_fp16 = bool(kwargs.get("half", False) or kwargs.get("fp16", False))
+        optimized = False
+        if use_fp16:
+            if not torch.cuda.is_available():
+                print("Warning: FP16 RF-DETR evaluation requested but CUDA is not available; using FP32.")
+                use_fp16 = False
+            elif hasattr(self._model, "optimize_for_inference"):
+                try:
+                    self._model.optimize_for_inference(
+                        compile=False, batch_size=1, dtype=torch.float16
+                    )
+                    optimized = True
+                except Exception as e:
+                    print(f"Warning: RF-DETR optimize_for_inference() failed; using FP32. Error: {e}")
+                    use_fp16 = False
+
         image_files = sorted(
             p
             for p in images_dir.iterdir()
             if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
         ) if images_dir.exists() else []
 
-        for img_path in image_files:
-            img = cv2.imread(str(img_path))
-            if img is None:
-                continue
-            image_id += 1
-            h, w = img.shape[:2]
+        try:
+            for img_path in image_files:
+                img = cv2.imread(str(img_path))
+                if img is None:
+                    continue
+                image_id += 1
+                h, w = img.shape[:2]
 
-            gt_images.append(
-                {"id": image_id, "file_name": img_path.name, "width": w, "height": h}
-            )
+                gt_images.append(
+                    {"id": image_id, "file_name": img_path.name, "width": w, "height": h}
+                )
 
-            # --- Ground truth from YOLO labels ---
-            label_path = labels_dir / f"{img_path.stem}.txt"
-            if label_path.exists():
-                with open(label_path) as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) < 5:
+                # --- Ground truth from YOLO labels ---
+                label_path = labels_dir / f"{img_path.stem}.txt"
+                if label_path.exists():
+                    with open(label_path) as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) < 5:
+                                continue
+                            cls_id = int(parts[0])
+                            if classes_filter and cls_id not in classes_filter:
+                                continue
+                            cx, cy, bw, bh = (
+                                float(parts[1]),
+                                float(parts[2]),
+                                float(parts[3]),
+                                float(parts[4]),
+                            )
+                            x = (cx - bw / 2) * w
+                            y = (cy - bh / 2) * h
+                            box_w = bw * w
+                            box_h = bh * h
+                            gt_annotations.append(
+                                {
+                                    "id": ann_id,
+                                    "image_id": image_id,
+                                    "category_id": cls_id,
+                                    "bbox": [x, y, box_w, box_h],
+                                    "area": box_w * box_h,
+                                    "iscrowd": 0,
+                                }
+                            )
+                            ann_id += 1
+
+                # --- Inference ---
+                t0 = time.time()
+                img_rgb = (
+                    cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    if img.ndim == 3 and img.shape[2] == 3
+                    else img
+                )
+                detections = self._model.predict(img_rgb, threshold=conf_threshold)
+                t1 = time.time()
+                total_inference_ms += (t1 - t0) * 1000
+
+                if detections is not None and len(detections) > 0:
+                    for i in range(len(detections)):
+                        det_cls = int(detections.class_id[i])
+                        if classes_filter and det_cls not in classes_filter:
                             continue
-                        cls_id = int(parts[0])
-                        if classes_filter and cls_id not in classes_filter:
-                            continue
-                        cx, cy, bw, bh = (
-                            float(parts[1]),
-                            float(parts[2]),
-                            float(parts[3]),
-                            float(parts[4]),
-                        )
-                        x = (cx - bw / 2) * w
-                        y = (cy - bh / 2) * h
-                        box_w = bw * w
-                        box_h = bh * h
-                        gt_annotations.append(
+                        x1, y1, x2, y2 = detections.xyxy[i]
+                        score = float(detections.confidence[i])
+                        dt_results.append(
                             {
-                                "id": ann_id,
                                 "image_id": image_id,
-                                "category_id": cls_id,
-                                "bbox": [x, y, box_w, box_h],
-                                "area": box_w * box_h,
-                                "iscrowd": 0,
+                                "category_id": det_cls,
+                                "bbox": [
+                                    float(x1),
+                                    float(y1),
+                                    float(x2 - x1),
+                                    float(y2 - y1),
+                                ],
+                                "score": score,
                             }
                         )
-                        ann_id += 1
-
-            # --- Inference ---
-            t0 = time.time()
-            detections = self._model.predict(img, threshold=conf_threshold)
-            t1 = time.time()
-            total_inference_ms += (t1 - t0) * 1000
-
-            if detections is not None and len(detections) > 0:
-                for i in range(len(detections)):
-                    det_cls = int(detections.class_id[i])
-                    if classes_filter and det_cls not in classes_filter:
-                        continue
-                    x1, y1, x2, y2 = detections.xyxy[i]
-                    score = float(detections.confidence[i])
-                    dt_results.append(
-                        {
-                            "image_id": image_id,
-                            "category_id": det_cls,
-                            "bbox": [
-                                float(x1),
-                                float(y1),
-                                float(x2 - x1),
-                                float(y2 - y1),
-                            ],
-                            "score": score,
-                        }
-                    )
+        finally:
+            # Free the extra inference model to avoid holding duplicate weights in VRAM.
+            if optimized and hasattr(self._model, "remove_optimized_model"):
+                try:
+                    self._model.remove_optimized_model()
+                except Exception:
+                    pass
 
         # --- Compute metrics via pycocotools ---
         categories = [{"id": i, "name": n} for i, n in class_names.items()]

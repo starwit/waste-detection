@@ -24,9 +24,11 @@ class _StubRFDETR:
     def __init__(self, detections: _Detections):
         self._detections = detections
         self.threshold_calls: list[float] = []
+        self.input_images: list[np.ndarray] = []
 
     def predict(self, img: np.ndarray, threshold: float = 0.5):
         self.threshold_calls.append(float(threshold))
+        self.input_images.append(np.asarray(img))
         return self._detections
 
 
@@ -52,6 +54,25 @@ def test_predict_converts_detections_to_yolo_like_result() -> None:
     assert boxes.cls.tolist() == pytest.approx([1.0])
     plotted = results[0].plot()
     assert plotted.shape == img.shape
+
+
+def test_predict_converts_bgr_to_rgb_for_rfdetr_predict() -> None:
+    dets = _Detections(
+        xyxy=np.empty((0, 4), dtype=np.float32),
+        confidence=np.empty(0, dtype=np.float32),
+        class_id=np.empty(0, dtype=np.int64),
+    )
+    model = _StubRFDETR(dets)
+    adapter = adapter_mod.RFDETRModelAdapter(model)
+
+    img = np.zeros((1, 1, 3), dtype=np.uint8)
+    img[0, 0] = [1, 2, 3]  # BGR
+
+    result = adapter.predict(img, conf=0.25)[0]
+
+    assert model.input_images, "Expected RF-DETR predict() to be called"
+    assert model.input_images[-1][0, 0].tolist() == [3, 2, 1]  # RGB
+    assert result.orig_img[0, 0].tolist() == [1, 2, 3]  # still BGR for plotting
 
 
 def test_predict_handles_empty_detections() -> None:
