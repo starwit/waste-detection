@@ -197,8 +197,10 @@ def test_val_real_coco_metrics_path_with_perfect_detection(tmp_path: Path) -> No
     metrics = adapter.val(data=str(dataset_yaml), conf=0.25)
 
     assert metrics.results_dict["metrics/mAP50(B)"] > 0.99
+    assert metrics.results_dict["metrics/mAP50-95(B)"] > 0.99
     assert metrics.results_dict["metrics/recall(B)"] > 0.99
     assert metrics.results_dict["metrics/precision(B)"] > 0.99
+    assert metrics.results_dict["metrics/f1(B)"] > 0.99
 
 
 def test_val_requires_dataset_yaml() -> None:

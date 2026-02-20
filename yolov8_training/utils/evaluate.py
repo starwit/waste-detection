@@ -281,12 +281,22 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     map50_95 = float(metrics.results_dict["metrics/mAP50-95(B)"])
     fitness = float(metrics.fitness)
 
-    # Calculate F1 score
-    f1_score = (
-        2 * (precision * recall) / (precision + recall)
-        if (precision + recall) > 0
-        else 0
-    )
+    # Calculate F1 score.
+    # For RF-DETR adapter runs, val() can provide a native macro-F1 computed
+    # via a confidence-threshold sweep; prefer that when available.
+    f1_score = None
+    try:
+        f1_from_model = metrics.results_dict.get("metrics/f1(B)")
+        if f1_from_model is not None:
+            f1_score = float(f1_from_model)
+    except Exception:
+        f1_score = None
+    if f1_score is None:
+        f1_score = (
+            2 * (precision * recall) / (precision + recall)
+            if (precision + recall) > 0
+            else 0
+        )
 
     effective_imgsz = getattr(model, "resolution", kwargs.get("imgsz"))
 

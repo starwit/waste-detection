@@ -40,10 +40,7 @@ def _ensure_default_baseline_stub() -> None:
     Missing files are created as 0-byte stubs. Runtime loading rejects empty files
     and falls back to an official checkpoint for baseline comparison.
     """
-    try:
-        params = _load_params_yaml()
-    except Exception:
-        params = {}
+    params = _load_params_yaml()
 
     finetune_cfg = (params.get("train", {}) or {}).get("finetune", {}) or {}
     eval_cfg = params.get("evaluation", {}) or {}

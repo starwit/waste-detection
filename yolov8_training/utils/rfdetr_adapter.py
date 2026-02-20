@@ -118,6 +118,29 @@ class _ValMetrics:
     speed: Dict[str, float]
     per_class: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
+@dataclass
+class _CocoEvalResults:
+    """Container for COCO-eval-derived metrics.
+
+    Iterable so existing unpacking patterns keep working:
+
+        precision, recall, map50, map50_95, per_class = _compute_coco_metrics(...)
+    """
+
+    precision: float
+    recall: float
+    map50: float
+    map50_95: float
+    per_class: Dict[str, Dict[str, float]]
+    macro_f1: float = 0.0
+
+    def __iter__(self):
+        yield self.precision
+        yield self.recall
+        yield self.map50
+        yield self.map50_95
+        yield self.per_class
+
 
 # ---------------------------------------------------------------------------
 # Main adapter
@@ -366,21 +389,33 @@ class RFDETRModelAdapter:
 
         # --- Compute metrics via pycocotools ---
         categories = [{"id": i, "name": n} for i, n in class_names.items()]
-        precision, recall, map50, map50_95, per_class = _compute_coco_metrics(
+        coco_metrics = _compute_coco_metrics(
             gt_images, gt_annotations, dt_results, categories
         )
+        precision, recall, map50, map50_95, per_class = coco_metrics
+        macro_f1 = getattr(coco_metrics, "macro_f1", None)
 
         # Ultralytics fitness formula: 0.1 * mAP50 + 0.9 * mAP50-95
         fitness = 0.1 * map50 + 0.9 * map50_95
         avg_inference = total_inference_ms / max(image_id, 1)
 
+        results_dict = {
+            "metrics/precision(B)": precision,
+            "metrics/recall(B)": recall,
+            "metrics/mAP50(B)": map50,
+            "metrics/mAP50-95(B)": map50_95,
+        }
+        # Native RF-DETR reports F1 from a confidence-threshold sweep (macro-F1),
+        # not derived from a single (precision, recall) pair. Surface it so the
+        # shared validate_model() can log the same value for RF-DETR runs.
+        if macro_f1 is not None:
+            try:
+                results_dict["metrics/f1(B)"] = float(macro_f1)
+            except (TypeError, ValueError):
+                pass
+
         return _ValMetrics(
-            results_dict={
-                "metrics/precision(B)": precision,
-                "metrics/recall(B)": recall,
-                "metrics/mAP50(B)": map50,
-                "metrics/mAP50-95(B)": map50_95,
-            },
+            results_dict=results_dict,
             fitness=fitness,
             # RF-DETR timing includes the full predict() call (preprocess+inference+postprocess)
             # so we report it all under "inference" with the others zeroed out.
@@ -418,16 +453,15 @@ def _parse_class_names(ds_cfg: dict) -> Dict[int, str]:
         return {k: parsed[k] for k in sorted(parsed)}
     return {}
 
-
 def _compute_coco_metrics(
     images: list[dict],
     annotations: list[dict],
     detections: list[dict],
     categories: list[dict],
-) -> tuple[float, float, float, float, dict]:
-    """Run COCO evaluation via pycocotools and return (precision, recall, mAP50, mAP50-95, per_class)."""
+) -> _CocoEvalResults:
+    """Run COCO evaluation via pycocotools and return COCO + extended metrics."""
     if len(images) == 0:
-        return 0.0, 0.0, 0.0, 0.0, {}
+        return _CocoEvalResults(0.0, 0.0, 0.0, 0.0, {}, macro_f1=0.0)
     return _coco_eval_pycocotools(images, annotations, detections, categories)
 
 
@@ -436,7 +470,7 @@ def _coco_eval_pycocotools(
     annotations: list[dict],
     detections: list[dict],
     categories: list[dict],
-) -> tuple[float, float, float, float, dict]:
+) -> _CocoEvalResults:
     """COCO evaluation using pycocotools."""
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
@@ -452,7 +486,7 @@ def _coco_eval_pycocotools(
 
     if len(detections) == 0 or len(annotations) == 0:
         # No detections or no ground-truth → everything is zero
-        return 0.0, 0.0, 0.0, 0.0, {}
+        return _CocoEvalResults(0.0, 0.0, 0.0, 0.0, {}, macro_f1=0.0)
 
     # Suppress pycocotools stdout spam
     old_stdout = sys.stdout
@@ -460,9 +494,14 @@ def _coco_eval_pycocotools(
     try:
         coco_dt = coco_gt.loadRes(detections)
         coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
+        # Align COCOeval settings with native RF-DETR evaluation defaults.
+        # Native RF-DETR uses eval_max_dets=500 and a patched summarize()
+        # to compute AP@[.5:.95] at maxDets=maxDets[2] (not hardcoded 100).
+        coco_eval.params.maxDets = [1, 10, 500]
+        from rfdetr.datasets.coco_eval import patched_pycocotools_summarize
         coco_eval.evaluate()
         coco_eval.accumulate()
-        coco_eval.summarize()
+        patched_pycocotools_summarize(coco_eval)
     finally:
         sys.stdout = old_stdout
 
@@ -471,64 +510,26 @@ def _coco_eval_pycocotools(
     map50_95 = float(coco_eval.stats[0])
     map50 = float(coco_eval.stats[1])
 
-    # Extract precision / recall from the evaluation arrays.
-    # precision shape: (T=10, R=101, K, A=4, M=3)
-    # recall shape:    (T=10, K, A=4, M=3)
-    # IoU=0.5 is index 0, area=all is index 0, maxDets=100 is index 2.
-    prec_array = coco_eval.eval["precision"]  # (T, R, K, A, M)
-    rec_array = coco_eval.eval["recall"]  # (T, K, A, M)
+    # Native RF-DETR reports macro precision/recall/F1 by sweeping confidence thresholds
+    # using COCOeval's raw matching data (evalImgs). Use its implementation directly
+    # so adapter numbers match RF-DETR evaluation output.
+    from rfdetr.engine import coco_extended_metrics
+    extended = coco_extended_metrics(coco_eval)
+    precision = float(extended.get("precision", 0.0))
+    recall = float(extended.get("recall", 0.0))
+    macro_f1 = float(extended.get("f1_score", 0.0))
 
-    # Mean precision across recall thresholds & classes at IoU=0.5
-    p50 = prec_array[0, :, :, 0, 2]  # (101, K)
-    valid_p = p50[p50 > -1]
-    precision = float(np.mean(valid_p)) if valid_p.size > 0 else 0.0
-
-    # Mean recall across classes at IoU=0.5
-    r50 = rec_array[0, :, 0, 2]  # (K,)
-    valid_r = r50[r50 > -1]
-    recall = float(np.mean(valid_r)) if valid_r.size > 0 else 0.0
-
-    # --- Per-class metrics ---
-    cat_id_to_name = {cat["id"]: cat["name"] for cat in categories}
-    cat_ids = coco_eval.params.catIds  # category ids used in evaluation
     per_class: dict[str, dict[str, float]] = {}
-
-    for k_idx, cat_id in enumerate(cat_ids):
-        cls_name = cat_id_to_name.get(cat_id, f"class_{cat_id}")
-
-        # Per-class AP50: mean precision at IoU=0.5 across 101 recall thresholds
-        p50_cls = prec_array[0, :, k_idx, 0, 2]  # (101,)
-        valid_p50_cls = p50_cls[p50_cls > -1]
-        cls_ap50 = float(np.mean(valid_p50_cls)) if valid_p50_cls.size > 0 else 0.0
-
-        # Per-class mAP50-95: mean AP across all 10 IoU thresholds
-        ap_per_iou = []
-        for t_idx in range(prec_array.shape[0]):
-            p_t = prec_array[t_idx, :, k_idx, 0, 2]
-            valid_p_t = p_t[p_t > -1]
-            ap_per_iou.append(float(np.mean(valid_p_t)) if valid_p_t.size > 0 else 0.0)
-        cls_map = float(np.mean(ap_per_iou)) if ap_per_iou else 0.0
-
-        # Per-class recall at IoU=0.5
-        cls_recall_val = float(rec_array[0, k_idx, 0, 2]) if rec_array[0, k_idx, 0, 2] > -1 else 0.0
-
-        # Precision at best-F1 operating point on the P-R curve at IoU=0.5
-        recall_thresholds = np.linspace(0, 1, 101)
-        best_f1, best_p, best_r = 0.0, 0.0, 0.0
-        for r_idx, r_thr in enumerate(recall_thresholds):
-            p_val = p50_cls[r_idx]
-            if p_val < 0:
-                continue
-            f1_val = 2 * p_val * r_thr / (p_val + r_thr) if (p_val + r_thr) > 0 else 0.0
-            if f1_val > best_f1:
-                best_f1, best_p, best_r = f1_val, float(p_val), float(r_thr)
-
+    for row in extended.get("class_map", []) or []:
+        cls_name = str(row.get("class", "")).strip()
+        if not cls_name or cls_name.lower() == "all":
+            continue
         per_class[cls_name] = {
-            "precision": best_p,
-            "recall": best_r if best_r > 0 else cls_recall_val,
-            "map50": cls_ap50,
-            "map": cls_map,
-            "f1_score": best_f1,
+            "precision": float(row.get("precision", 0.0) or 0.0),
+            "recall": float(row.get("recall", 0.0) or 0.0),
+            "map50": float(row.get("map@50", 0.0) or 0.0),
+            "map": float(row.get("map@50:95", 0.0) or 0.0),
+            "f1_score": float(row.get("f1_score", 0.0) or 0.0),
         }
 
-    return precision, recall, map50, map50_95, per_class
+    return _CocoEvalResults(precision, recall, map50, map50_95, per_class, macro_f1=macro_f1)

@@ -175,8 +175,6 @@ def train_rfdetr(
             f"Warning: RF-DETR did not produce {missing_name}. "
             f"Using {fallback_src.name} as {best_total.name}."
         )
-    except Exception:
-        raise
     return model, output_dir
 
 

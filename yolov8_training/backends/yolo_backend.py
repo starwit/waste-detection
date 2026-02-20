@@ -18,20 +18,14 @@ def _resolve_save_dir(model, results, default: Path) -> Path:
     Keeps train_model concise while handling version differences
     (trainer.save_dir vs. results.save_dir).
     """
-    try:
-        trainer = getattr(model, "trainer", None)
-        candidate = getattr(trainer, "save_dir", None) if trainer is not None else None
-        if candidate:
-            return Path(candidate)
-    except Exception:
-        pass
+    trainer = getattr(model, "trainer", None)
+    candidate = getattr(trainer, "save_dir", None) if trainer is not None else None
+    if isinstance(candidate, (str, Path)):
+        return Path(candidate)
 
-    try:
-        candidate = getattr(results, "save_dir", None)
-        if candidate:
-            return Path(candidate)
-    except Exception:
-        pass
+    candidate = getattr(results, "save_dir", None)
+    if isinstance(candidate, (str, Path)):
+        return Path(candidate)
 
     return default
 
@@ -194,4 +188,3 @@ def train_yolo(
         )
     )
     return model, results, train_output_dir, final_experiment_name
-
