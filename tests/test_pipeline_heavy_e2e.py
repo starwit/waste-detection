@@ -95,26 +95,6 @@ def test_heavy_e2e_rfdetr_one_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     create_minimal_dataset(tmp_path)
 
-    # RF-DETR can fail to create checkpoint_best_regular/ema when mAP stays at 0.0
-    # on tiny datasets, but still writes checkpoint.pth files. Patch the final
-    # copy step to use a fallback checkpoint so this test validates our pipeline
-    # behavior instead of failing on this upstream edge case.
-    import rfdetr.main as rfdetr_main
-
-    copy2_original = rfdetr_main.shutil.copy2
-
-    def _copy2_with_best_checkpoint_fallback(src, dst, *args, **kwargs):
-        src_path = Path(src)
-        if src_path.name in {"checkpoint_best_regular.pth", "checkpoint_best_ema.pth"} and not src_path.exists():
-            fallback_candidates = [src_path.parent / "checkpoint.pth"]
-            fallback_candidates.extend(sorted(src_path.parent.glob("checkpoint*.pth"), reverse=True))
-            for candidate in fallback_candidates:
-                if candidate.exists() and candidate.stat().st_size > 0:
-                    return copy2_original(candidate, dst, *args, **kwargs)
-        return copy2_original(src, dst, *args, **kwargs)
-
-    monkeypatch.setattr(rfdetr_main.shutil, "copy2", _copy2_with_best_checkpoint_fallback)
-
     write_params_yaml(
         tmp_path,
         {

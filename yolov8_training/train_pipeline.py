@@ -302,6 +302,7 @@ def _load_baseline_from_path(path_candidate: str | None) -> tuple[object | None,
                 model_variant=model_variant,
                 pretrain_weights=str(candidate_path),
                 device=device,
+                resolution=int(resolution),
             )
             from yolov8_training.utils.rfdetr_adapter import RFDETRModelAdapter
 

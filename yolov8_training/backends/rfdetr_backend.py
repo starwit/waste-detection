@@ -62,6 +62,7 @@ def _get_rfdetr_model(
     model_variant: str,
     pretrain_weights: str | None = None,
     device: str | None = None,
+    resolution: int | None = None,
     gradient_checkpointing: bool | None = None,
 ):
     """Return an initialized RF-DETR model based on a variant name."""
@@ -96,6 +97,8 @@ def _get_rfdetr_model(
         init_kwargs["pretrain_weights"] = pretrain_weights
     if device:
         init_kwargs["device"] = device
+    if resolution is not None:
+        init_kwargs["resolution"] = int(resolution)
     if gradient_checkpointing is not None:
         init_kwargs["gradient_checkpointing"] = bool(gradient_checkpointing)
     return model_cls(**init_kwargs) if init_kwargs else model_cls()
@@ -125,6 +128,7 @@ def train_rfdetr(
         model_variant,
         pretrain_weights=pretrain_weights,
         device=device,
+        resolution=resolution,
         gradient_checkpointing=gradient_checkpointing,
     )
 
@@ -143,7 +147,36 @@ def train_rfdetr(
     if extra_train_kwargs:
         train_kwargs.update(extra_train_kwargs)
 
-    model.train(**train_kwargs)
+    try:
+        model.train(**train_kwargs)
+    except FileNotFoundError as e:
+        # Upstream RF-DETR edge case: if mAP never exceeds the initial 0.0 on
+        # very small/broken datasets, it may never write checkpoint_best_*.pth,
+        # but still attempts to copy it into checkpoint_best_total.pth at the end.
+        #
+        # Treat this as non-fatal and fall back to a regular checkpoint so our
+        # pipeline can continue and export weights/best.pt.
+        missing_name = Path(getattr(e, "filename", "") or "").name
+        if missing_name not in {"checkpoint_best_regular.pth", "checkpoint_best_ema.pth"}:
+            raise
+
+        fallback_candidates = [output_dir / "checkpoint.pth"]
+        fallback_candidates.extend(sorted(output_dir.glob("checkpoint*.pth"), reverse=True))
+        fallback_src = next(
+            (p for p in fallback_candidates if p.exists() and p.stat().st_size > 0),
+            None,
+        )
+        if fallback_src is None:
+            raise
+
+        best_total = output_dir / "checkpoint_best_total.pth"
+        shutil.copy2(fallback_src, best_total)
+        print(
+            f"Warning: RF-DETR did not produce {missing_name}. "
+            f"Using {fallback_src.name} as {best_total.name}."
+        )
+    except Exception:
+        raise
     return model, output_dir
 
 
@@ -316,4 +349,3 @@ def train_rfdetr_backend(
             pass
 
     return model, train_output_dir, display_name, int(rfdetr_resolution), int(rfdetr_epochs)
-

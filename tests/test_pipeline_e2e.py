@@ -303,11 +303,18 @@ def test_pipeline_loads_rfdetr_baseline_from_metadata(
 
             return _EmptyDets()
 
-    def _fake_get_rfdetr_model(model_variant, pretrain_weights=None, device=None, gradient_checkpointing=None):
+    def _fake_get_rfdetr_model(
+        model_variant,
+        pretrain_weights=None,
+        device=None,
+        resolution=None,
+        gradient_checkpointing=None,
+    ):
         rfdetr_load_calls.append(
             {
                 "variant": str(model_variant),
                 "weights": str(pretrain_weights),
+                "resolution": str(resolution),
             }
         )
         return _StubRFDETRBaseline()
@@ -324,6 +331,7 @@ def test_pipeline_loads_rfdetr_baseline_from_metadata(
     assert rfdetr_load_calls
     assert rfdetr_load_calls[0]["variant"] == "nano"
     assert rfdetr_load_calls[0]["weights"] == str(baseline_weights)
+    assert rfdetr_load_calls[0]["resolution"] == "320"
     # One official YOLO load for training is expected; no extra fallback baseline load.
     assert sum(1 for model in StubYOLO.recorded_models if model.startswith("yolov8")) == 1
 
