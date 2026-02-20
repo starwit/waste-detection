@@ -2,6 +2,7 @@
 
 This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
 The training pipeline supports both Ultralytics YOLO and RF-DETR backends.
+Backends are selected via `train.model` and `models.<key>.backend` in `params.yaml`. Backend-specific training code lives in `yolov8_training/backends/`, and RF-DETR models are wrapped in `RFDETRModelAdapter` so the shared evaluation and plotting tooling can treat them like Ultralytics models.
 
 ### Why DVC here?
 
@@ -174,6 +175,8 @@ models:
     resolution: 1280
 ```
 
+Select the backend by setting `train.model` to a key under `models` (e.g. `yolo11m` or `rfdetr-medium`).
+
 * If `custom_classes` is non-empty, those names become class 0…n-1.  
 * If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
 
@@ -296,7 +299,7 @@ For detailed documentation, see [`docs/CLASS_MAPPING.md`](docs/CLASS_MAPPING.md)
 
 ## Testing
 
-This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
+This project includes unit tests, an end-to-end (E2E) pipeline smoke test, and opt-in heavy integration tests.
 
 - Using unittest
   - Run all tests:
@@ -313,10 +316,15 @@ This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
     ```bash
     poetry run pytest -q
     ```
+  - Run heavy integration tests:
+    ```bash
+    poetry run pytest -q --heavy
+    ```
 
 Notes
 - The E2E test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
-- Tests run on CPU with a minimal YOLOv8n configuration and a single epoch to keep runtime low.
+- Default tests use stubs so they do not download checkpoints or run long training jobs.
+- Heavy tests run real backend training and require local checkpoints (e.g. `yolov8n.pt` and `rf-detr-nano.pth`).
 
 ---
 
