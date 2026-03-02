@@ -2845,7 +2845,7 @@ rtmdet = ["mmcv (>=2.1.0,<2.2.0)", "mmdet (>=3.3.0,<3.4.0)", "mmengine (>=0.10.7
 type = "git"
 url = "https://github.com/starwit/object-detector-trainer.git"
 reference = "feature/AB#2137-refactor-training-pipeline"
-resolved_reference = "76463a481c4b752137fd250be09c5bc1ed139f3c"
+resolved_reference = "e3acdf505c65c9d532603b19c77c3228a35fe9f3"
 
 [[package]]
 name = "omegaconf"
