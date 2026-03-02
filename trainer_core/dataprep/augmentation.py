@@ -1,14 +1,17 @@
 import numpy as np
 
-# weird temporary patches becasuse old imgaug
-np.bool = bool
-np.complex = complex 
-if not hasattr(np, 'sctypes'):
+# Compatibility shims for old imgaug on modern NumPy versions.
+# Use NumPy scalar types (not Python builtins) to avoid breaking SciPy imports.
+if not hasattr(np, "bool"):
+    np.bool = np.bool_
+if not hasattr(np, "complex"):
+    np.complex = np.complex128
+if not hasattr(np, "sctypes"):
     np.sctypes = {
-        'float': [np.float16, np.float32, np.float64, np.longdouble],
-        'int': [np.int8, np.int16, np.int32, np.int64],
-        'uint': [np.uint8, np.uint16, np.uint32, np.uint64],
-        'complex': [np.complex64, np.complex128, np.clongdouble]
+        "float": [np.float16, np.float32, np.float64, np.longdouble],
+        "int": [np.int8, np.int16, np.int32, np.int64],
+        "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+        "complex": [np.complex64, np.complex128, np.clongdouble],
     }
 
 import imgaug.augmenters as iaa

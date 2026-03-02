@@ -1,8 +1,20 @@
 # dvc.yaml
 stages:
+  # Preflight: verifies optional weight deps configured in params.yaml exist locally.
+  # setup_project.py creates 0-byte placeholders for these paths on fresh clones so
+  # DVC dependency checks stay deterministic and failures are explicit/actionable.
+  check_optional_weight_deps:
+    cmd: python trainer_core/pipeline/check_optional_weight_deps.py
+    deps:
+      - trainer_core/pipeline/check_optional_weight_deps.py
+      - params.yaml
+    outs:
+      - .tmp/dvc_bootstrap.txt
+    always_changed: true
+
   prepare_data:
     cmd: >
-      python yolov8_training/train_pipeline.py --stage prepare
+      python -m projects.waste_detection.pipeline --stage prepare
       --dataset-name ${data.dataset_name}
       --val-split ${prepare.val_split}
       --test-split ${prepare.test_split}
@@ -12,40 +24,82 @@ stages:
       - data
       - prepare
     deps:
-      - yolov8_training/train_pipeline.py
-      - yolov8_training/utils/data_utils.py
-      - yolov8_training/utils/find_duplicates.py
-      - yolov8_training/utils/augmentation.py
+      - projects/waste_detection/pipeline.py
+      - trainer_core/cli.py
+      - trainer_core/config/schema.py
+      - trainer_core/config/loader.py
+      - trainer_core/config/overrides.py
+      - trainer_core/pipeline/prepare_stage.py
+      - trainer_core/pipeline/train_stage.py
+      - trainer_core/dataprep/transforms.py
+      - trainer_core/dataprep/outputs.py
+      - trainer_core/dataprep/find_duplicates.py
+      - trainer_core/dataprep/augmentation.py
+      - trainer_core/dataprep/types.py
       - raw_data/
     outs:
       - datasets/${data.dataset_name}
 
-  train_and_evaluate:
+  train_model:
     cmd: >
-      python yolov8_training/train_pipeline.py --stage train
+      python -m projects.waste_detection.pipeline --stage train
       --dataset-name ${data.dataset_name}
-      --model-size ${train.model_size}
-      --image-size ${train.image_size}
-      --epochs ${train.epochs}
-      --batch-size ${train.batch_size}
+      --model ${train.model}
       --val-split ${prepare.val_split}
     params:
       - data
       - prepare.val_split
       - train
+      - models
       - evaluation.baseline_weights_path
     deps:
-      - yolov8_training/train_pipeline.py
-      - yolov8_training/utils/evaluate.py
-      - yolov8_training/utils/data_utils.py
-      - yolov8_training/utils/find_duplicates.py
+      - projects/waste_detection/pipeline.py
+      - trainer_core/cli.py
+      - trainer_core/types.py
+      - trainer_core/pipeline/train_stage.py
+      - trainer_core/backends/shared.py
+      - trainer_core/backends/yolo.py
+      - trainer_core/backends/rfdetr.py
+      - trainer_core/backends/mmdet.py
+      - trainer_core/wrappers/rfdetr.py
+      - trainer_core/wrappers/rtmdet.py
+      - .tmp/dvc_bootstrap.txt
       - datasets/${data.dataset_name}
-      # Track configured baseline paths for DVC change detection
-      # Stub files (0-byte) satisfy DVC deps but are rejected by training code
-      - ${train.pretrained_model_path}
-      - ${evaluation.baseline_weights_path}
+      # Optional but path-stable dependency: placeholder created by setup_project.py.
+      - ${train.finetune.weights}
     outs:
       - runs
+
+  evaluate_model:
+    cmd: >
+      python -m projects.waste_detection.pipeline --stage evaluate
+      --dataset-name ${data.dataset_name}
+      --model ${train.model}
+      --val-split ${prepare.val_split}
+    params:
+      - data
+      - prepare.val_split
+      - train.model
+      - evaluation.baseline_weights_path
+      - data.class_mapping
+      - prepare.auto_replay
+    deps:
+      - projects/waste_detection/pipeline.py
+      - trainer_core/cli.py
+      - trainer_core/types.py
+      - trainer_core/pipeline/evaluate_stage.py
+      - trainer_core/pipeline/train_stage.py
+      - trainer_core/evaluation/validate.py
+      - trainer_core/evaluation/reports.py
+      - trainer_core/evaluation/extras.py
+      - trainer_core/plugins/replay.py
+      - trainer_core/dataprep/outputs.py
+      - .tmp/dvc_bootstrap.txt
+      - runs/.last_train_result.json
+      - runs
+      # Optional but path-stable dependency: placeholder created by setup_project.py.
+      - ${evaluation.baseline_weights_path}
+    outs:
       - results_comparison/
-    metrics: 
+    metrics:
       - metrics.json

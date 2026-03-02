@@ -39,14 +39,10 @@ def _pred_boxes_from_result(result) -> List[Box]:
     # ultralytics result.boxes exposes .cls, .conf, .xywhn
     boxes = []
     for b in getattr(result, "boxes", []) or []:
-        try:
-            cls_id = int(b.cls)
-        except Exception:
-            cls_id = int(b.cls.item()) if hasattr(b.cls, "item") else int(b.cls)
-        try:
-            conf = float(b.conf)
-        except Exception:
-            conf = float(b.conf.item()) if hasattr(b.conf, "item") else float(b.conf)
+        cls_raw = b.cls.item() if hasattr(b.cls, "item") else b.cls
+        conf_raw = b.conf.item() if hasattr(b.conf, "item") else b.conf
+        cls_id = int(cls_raw)
+        conf = float(conf_raw)
         xywhn = getattr(b, "xywhn", None)
         if xywhn is None:
             # Fallback: try xywh in pixels and approximate normalize later (not ideal)
@@ -219,15 +215,9 @@ def update_replay_folder(
         to_remove = len(imgs) - max_total
         for p in _sorted_by_mtime(imgs)[:to_remove]:
             lbl = labels_out / (p.stem + ".txt")
-            try:
-                p.unlink()
-            except OSError:
-                pass
+            p.unlink(missing_ok=True)
             if lbl.exists():
-                try:
-                    lbl.unlink()
-                except OSError:
-                    pass
+                lbl.unlink(missing_ok=True)
 
 
 def build_or_update_replay_set(
@@ -278,4 +268,3 @@ def build_or_update_replay_set(
     run_id = Path(train_output_dir).name
     update_replay_folder(cands, run_id, dest, max_total=max_total)
     print(f"[Replay] Added {len(cands)} examples to {dest} (max_total={max_total}).")
-

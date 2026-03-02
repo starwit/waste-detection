@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-from yolov8_training.utils.find_duplicates import DuplicateDetector
+from trainer_core.dataprep.find_duplicates import DuplicateDetector
 
 
 def test_detect_duplicates(tmp_path: Path):

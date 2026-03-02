@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from yolov8_training.utils.data_utils import process_single_images
+from trainer_core.dataprep.transforms import process_single_images
 
 
 def test_cvat_train_txt_paths(tmp_path: Path):

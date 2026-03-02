@@ -1,24 +1,19 @@
-import json
 import random
 import os
 from pathlib import Path
 import cv2
 import shutil
 import numpy as np
-import re
 import yaml
-import csv
 from typing import List, Dict, Set
 
-from yolov8_training.utils.types import (
+from trainer_core.dataprep.types import (
     ImageLabelPair,
     ProcessedFolder,
-    SplitData,
 )
 
-from yolov8_training.utils.find_duplicates import DuplicateDetector
-
-from yolov8_training.utils.augmentation import YOLOAugmenter
+from trainer_core.dataprep.augmentation import YOLOAugmenter
+from trainer_core.dataprep.find_duplicates import DuplicateDetector
 
 COCO_CLASSES = {
     "person": 0,
@@ -409,7 +404,7 @@ def _process_cvat_folder(
     folder_to_process: Path,
     scene_name: str,
     target_class_mapping: Dict[int, str],
-    folder_subsets: Dict[str, float],
+    folder_subsets: Dict[str, int | float],
     temp_folders: List[Path],
 ) -> ProcessedFolder:
     folder_pairs: List[ImageLabelPair] = []
@@ -432,8 +427,7 @@ def _process_cvat_folder(
         if image_path.exists():
             if not label_path.exists() or label_path.stat().st_size == 0:
                 label_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(label_path, "w") as f:
-                    pass
+                label_path.touch()
                 empty_label_count += 1
             convert_polygons_to_bboxes_inplace(label_path)
             folder_pairs.append(ImageLabelPair(image_path, label_path, scene_name))
@@ -442,29 +436,26 @@ def _process_cvat_folder(
 
     if (folder_to_process / "data.yaml").exists():
         temp_folder = some_folder.parent / f"{some_folder.name}_temp"
+        if temp_folder.exists():
+            shutil.rmtree(temp_folder)
+        shutil.copytree(folder_to_process, temp_folder)
         try:
-            shutil.copytree(folder_to_process, temp_folder)
             remap_yaml_dataset_labels(temp_folder, target_class_mapping)
-            # Only track temp_folder if remap succeeded
-            temp_folders.append(temp_folder)
-            # Use robust path remapping
-            folder_pairs = [
-                ImageLabelPair(
-                    temp_folder.joinpath(p.image.relative_to(folder_to_process)),
-                    temp_folder.joinpath(p.label.relative_to(folder_to_process)),
-                    p.scene,
-                )
-                for p in folder_pairs
-            ]
-        except Exception as e:
-            print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
-            print("Continuing without class mapping for this folder.")
-            # Clean up orphaned/partial temp_folder
-            if Path(temp_folder).exists():
-                try:
-                    shutil.rmtree(temp_folder)
-                except Exception as cleanup_exc:
-                    print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
+        except (KeyError, TypeError, ValueError, yaml.YAMLError) as e:
+            shutil.rmtree(temp_folder, ignore_errors=True)
+            raise ValueError(
+                f"Failed to apply class mapping for CVAT folder '{folder_to_process.name}': {e}"
+            ) from e
+
+        temp_folders.append(temp_folder)
+        folder_pairs = [
+            ImageLabelPair(
+                temp_folder.joinpath(p.image.relative_to(folder_to_process)),
+                temp_folder.joinpath(p.label.relative_to(folder_to_process)),
+                p.scene,
+            )
+            for p in folder_pairs
+        ]
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
@@ -480,7 +471,7 @@ def _process_manual_folder(
     folder_to_process: Path,
     scene_name: str,
     target_class_mapping: Dict[int, str],
-    folder_subsets: Dict[str, float],
+    folder_subsets: Dict[str, int | float],
     temp_folders: List[Path],
 ) -> ProcessedFolder:
     temp_pairs: List[ImageLabelPair] = []
@@ -499,8 +490,7 @@ def _process_manual_folder(
         if image_file.is_file() and image_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]:
             label_file = labels_folder / image_file.with_suffix(".txt").name
             if not label_file.exists() or label_file.stat().st_size == 0:
-                with open(label_file, "w") as f:
-                    pass
+                label_file.touch()
                 empty_label_count += 1
             convert_polygons_to_bboxes_inplace(label_file)
             temp_pairs.append(ImageLabelPair(image_file, label_file, scene_name))
@@ -509,41 +499,46 @@ def _process_manual_folder(
     if data_yaml_path.exists():
         print(f"Found data.yaml in manual structure: {folder_to_process.name}")
         temp_folder = some_folder.parent / f"{some_folder.name}_temp"
+        with open(data_yaml_path, "r") as f:
+            yaml_config = yaml.safe_load(f) or {}
+        if not isinstance(yaml_config, dict):
+            raise ValueError(
+                f"Invalid data.yaml in '{folder_to_process.name}': expected mapping, got {type(yaml_config)}"
+            )
+        if "names" not in yaml_config:
+            raise ValueError(f"Invalid data.yaml in '{folder_to_process.name}': missing 'names' section")
+
+        yaml_classes = yaml_config["names"]
+        mapping = map_class_names_to_ids(yaml_classes, target_class_mapping)
+        if not mapping:
+            print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
+            if isinstance(yaml_classes, list):
+                source_classes = yaml_classes
+            else:
+                source_classes = list(yaml_classes.values())
+            print(f"Source classes: {source_classes}")
+            print(f"Target classes: {list(target_class_mapping.values())}")
+
+        if temp_folder.exists():
+            shutil.rmtree(temp_folder)
+        shutil.copytree(folder_to_process, temp_folder)
         try:
-            with open(data_yaml_path, "r") as f:
-                yaml_config = yaml.safe_load(f)
-            if "names" not in yaml_config:
-                raise ValueError("data.yaml missing 'names' section")
-            yaml_classes = yaml_config["names"]
-            mapping = map_class_names_to_ids(yaml_classes, target_class_mapping)
-            if not mapping:
-                print(f"Warning: No classes in {data_yaml_path} can be mapped to target classes")
-                if isinstance(yaml_classes, list):
-                    source_classes = yaml_classes
-                else:
-                    source_classes = list(yaml_classes.values())
-                print(f"Source classes: {source_classes}")
-                print(f"Target classes: {list(target_class_mapping.values())}")
-            shutil.copytree(folder_to_process, temp_folder)
             remap_yaml_dataset_labels(temp_folder, target_class_mapping)
-            temp_folders.append(temp_folder)
-            temp_pairs = [
-                ImageLabelPair(
-                    temp_folder.joinpath(p.image.relative_to(folder_to_process)),
-                    temp_folder.joinpath(p.label.relative_to(folder_to_process)),
-                    p.scene,
-                )
-                for p in temp_pairs
-            ]
-        except Exception as e:
-            print(f"Error processing data.yaml in {folder_to_process.name}: {e}")
-            print("Continuing without class mapping for this folder.")
-            # Clean up temp folder if it was created
-            if Path(temp_folder).exists():
-                try:
-                    shutil.rmtree(temp_folder)
-                except Exception as cleanup_exc:
-                    print(f"Failed to clean up temp folder {temp_folder}: {cleanup_exc}")
+        except (KeyError, TypeError, ValueError, yaml.YAMLError) as e:
+            shutil.rmtree(temp_folder, ignore_errors=True)
+            raise ValueError(
+                f"Failed to apply class mapping for folder '{folder_to_process.name}': {e}"
+            ) from e
+
+        temp_folders.append(temp_folder)
+        temp_pairs = [
+            ImageLabelPair(
+                temp_folder.joinpath(p.image.relative_to(folder_to_process)),
+                temp_folder.joinpath(p.label.relative_to(folder_to_process)),
+                p.scene,
+            )
+            for p in temp_pairs
+        ]
 
     folder_name = some_folder.name
     if folder_name in folder_subsets:
@@ -556,7 +551,7 @@ def _process_manual_folder(
 
 def _dedupe_pairs(
     image_label_pairs: List[ImageLabelPair],
-    folder_subsets: Dict[str, float]
+    folder_subsets: Dict[str, int | float]
 ) -> List[ImageLabelPair]:
     detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
     folder_groups: Dict[str, List[ImageLabelPair]] = {}
@@ -639,7 +634,7 @@ def _dedupe_pairs(
 
 def _oversample_train_pairs(
     train_pairs: List[ImageLabelPair],
-    folder_subsets: Dict[str, float]
+    folder_subsets: Dict[str, int | float]
 ) -> List[ImageLabelPair]:
     if not folder_subsets:
         return train_pairs
@@ -714,23 +709,6 @@ names:
     print(f"Created dataset.yaml with {len(class_mapping)} classes: {list(class_mapping.values())}")
 
 
-def ensure_equal_files(frames_path, labels_path):
-    """
-    Ensure there are equal numbers of frame and label files by removing excess files from the directory with more files.
-    """
-    frames_files = sorted(os.listdir(frames_path))
-    labels_files = sorted(os.listdir(labels_path))
-
-    excess_frames = frames_files[len(labels_files) :]
-    excess_labels = labels_files[len(frames_files) :]
-
-    for frame in excess_frames:
-        os.remove(frames_path / frame)
-
-    for label in excess_labels:
-        os.remove(labels_path / label)
-
-
 def _poly_to_bbox_row(row):
     """row = [cls, x1, y1, x2, y2, …]  (normalised)  →  [cls, xc, yc, w, h]"""
     cls, pts = int(row[0]), row[1:]
@@ -762,69 +740,6 @@ def convert_polygons_to_bboxes_inplace(label_path: Path) -> None:
     if changed:                                      # overwrite only if we edited
         with open(label_path, "w") as f:
             f.write("\n".join(out) + "\n")
-
-
-def move_images_to_output(
-    train_images,
-    train_labels,
-    val_images,
-    val_labels,
-    train_output_path,
-    val_output_path,
-    video_name,
-    nth_frame=1,
-):
-    """
-    Handle moving of images and labels into training and validation directories,
-    preserving original frame numbers in the file names. Only keeps every nth frame if specified.
-    """
-
-    def move_files(images, labels, output_path, nth_frame):
-        for i, (image, label) in enumerate(zip(images, labels)):
-            if i % nth_frame == 0:
-                original_frame_number = int(image.stem.split("_")[-1])
-                new_image_name = f"{video_name}_{original_frame_number:06d}.jpg"
-                new_label_name = f"{video_name}_{original_frame_number:06d}.txt"
-                shutil.move(image, output_path / "images" / new_image_name)
-                shutil.move(label, output_path / "labels" / new_label_name)
-
-    move_files(train_images, train_labels, train_output_path, nth_frame)
-    move_files(val_images, val_labels, val_output_path, nth_frame)
-
-
-def split_data(
-    images: List[Path], labels: List[Path], val_split: float
-) -> SplitData:
-    """
-    Split the data into training and validation sets using random sampling.
-
-    Args:
-        images: List of paths to image files
-        labels: List of paths to label files
-        val_split: Fraction of data to use for validation (0.0 to 1.0)
-
-    Returns:
-        SplitData: (train_images, train_labels, val_images, val_labels)
-    """
-    if val_split == 0:
-        return SplitData(images, labels, [], [])
-
-    if val_split == 1:
-        return SplitData([], [], images, labels)
-
-    # Calculate validation set size
-    val_size = int(len(images) * val_split)
-
-    # Generate random indices for validation set
-    val_indices = set(random.sample(range(len(images)), val_size))
-
-    # Split images and labels
-    train_images = [img for i, img in enumerate(images) if i not in val_indices]
-    train_labels = [lbl for i, lbl in enumerate(labels) if i not in val_indices]
-    val_images = [img for i, img in enumerate(images) if i in val_indices]
-    val_labels = [lbl for i, lbl in enumerate(labels) if i in val_indices]
-
-    return SplitData(train_images, train_labels, val_images, val_labels)
 
 
 def augment(image_label_pairs: List[ImageLabelPair], augment_multiplier: int = 1):
@@ -1118,69 +1033,98 @@ def process_single_images(
     return train_count, val_count, test_count
 
 
-def save_test_results(train_output_dir, test_results, metadata):
-    # Save test results
-    with open(train_output_dir / "test_metrics.json", "w") as f:
-        json.dump(test_results, f, indent=4)
+def resolve_folder_subsets(
+    folder_subsets: Dict[str, int | float] | None, cli_overrides
+) -> Dict[str, int | float]:
+    resolved = dict(folder_subsets or {})
+    if not cli_overrides:
+        return resolved
 
-    # Prepare the data for CSV
-    csv_data = {
-        "MODEL": metadata["experiment_name"],
-        **{
-            k: v
-            for k, v in test_results.items()
-            if k
-            in [
-                "mp",
-                "mr",
-                "map",
-                "map50",
-                "map75",
-                "fp",
-                "fn",
-                "tp",
-                "fpr",
-                "f1_score",
-                "time",
-            ]
-        },
-        "val_split": metadata["split_parameters"]["val_split"],
-        "split_strategy": metadata["split_parameters"]["split_strategy"],
-        "temporal_split_size": metadata["split_parameters"]["temporal_split_size"],
-    }
-
-    # Save results to CSV
-    csv_path = train_output_dir / "test_results.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=csv_data.keys())
-        writer.writeheader()
-        writer.writerow(csv_data)
-    print(f"Test results saved to {train_output_dir / 'test_metrics.json'}")
-    print(f"Results CSV saved to {csv_path}")
+    print("Overriding folder subset configuration with command-line arguments:")
+    for folder_name, ratio_str in cli_overrides:
+        try:
+            ratio = float(ratio_str)
+            if ratio <= 0:
+                print(f"  Warning: Invalid ratio {ratio} for {folder_name}. Must be > 0.")
+                continue
+            resolved[folder_name] = ratio
+            suffix = " (oversampling)" if ratio > 1 else ""
+            print(f"  {folder_name}: {ratio*100:.1f}%{suffix}")
+        except ValueError:
+            print(f"  Warning: Invalid ratio '{ratio_str}' for {folder_name}. Must be a number.")
+    return resolved
 
 
-def reorganize_output(train_output_dir, training_path, test_path, metadata):
-    # Save metadata
-    with open(train_output_dir / "metadata.yaml", "w") as f:
-        yaml.dump(metadata, f)
+def create_dataset_from_raw(
+    *,
+    dataset_path: Path,
+    training_path: Path,
+    test_path: Path,
+    train_image_input_path: Path,
+    test_image_input_path: Path,
+    val_split: float,
+    test_split: float,
+    augment_multiplier: int,
+    custom_classes,
+    use_coco_classes: bool,
+    folder_subsets: Dict[str, int | float],
+    class_mapping_config: dict,
+    test_data_exists: bool,
+    recreate_dataset: bool,
+) -> tuple[int, int, int]:
+    if dataset_path.exists() and recreate_dataset:
+        print(f"Recreating dataset '{dataset_path.name}'...")
+        shutil.rmtree(dataset_path)
 
-    # Copy dataset YAML files
-    train_dataset_yaml_path = training_path / "dataset.yaml"
-    test_dataset_yaml_path = test_path / "dataset.yaml"
-    if train_dataset_yaml_path.exists():
-        shutil.copy(train_dataset_yaml_path, train_output_dir / "train_dataset.yaml")
-    if test_dataset_yaml_path.exists():
-        shutil.copy(test_dataset_yaml_path, train_output_dir / "test_dataset.yaml")
+    dataset_path.mkdir(parents=True, exist_ok=True)
+    for path in (training_path, test_path):
+        path.mkdir(parents=True, exist_ok=True)
 
-    # Organize files after training
-    plots_dir = train_output_dir / "plots"
-    plots_dir.mkdir(exist_ok=True)
-
-    # Move plot files to a new plots directory
-    for plot_file in list(sorted_glob(train_output_dir.glob("*.png"))) + list(
-        sorted_glob(train_output_dir.glob("*.jpg"))
+    for path in (
+        training_path / "train" / "images",
+        training_path / "train" / "labels",
+        training_path / "val" / "images",
+        training_path / "val" / "labels",
+        test_path / "val" / "images",
+        test_path / "val" / "labels",
     ):
-        shutil.move(str(plot_file), str(plots_dir / plot_file.name))
+        path.mkdir(parents=True, exist_ok=True)
 
-    print(f"Experiment data organized in {train_output_dir}")
-    print(f"Plots saved to {plots_dir}")
+    total_train_frames, total_val_frames, total_test_frames = process_single_images(
+        input_path=train_image_input_path,
+        train_output_path=training_path,
+        test_output_path=test_path,
+        val_split=val_split,
+        test_split=test_split,
+        augment_multiplier=augment_multiplier,
+        custom_classes=custom_classes,
+        use_coco_classes=use_coco_classes,
+        folder_subsets=folder_subsets,
+        class_mapping_config=class_mapping_config,
+    )
+    if total_train_frames <= 0:
+        raise ValueError(
+            "Prepare stage produced 0 training frames. "
+            f"(train={total_train_frames}, val={total_val_frames}, test={total_test_frames}). "
+            "Ensure raw_data/train contains labeled images and split/subset settings leave at least one training sample."
+        )
+
+    create_dataset_yaml(training_path, custom_classes, use_coco_classes, class_mapping_config)
+
+    test_folder_frame_count = 0
+    if test_data_exists:
+        _, test_folder_frame_count, _ = process_single_images(
+            input_path=test_image_input_path,
+            train_output_path=test_path,
+            test_output_path=test_path,
+            val_split=1,
+            test_split=0,
+            augment_multiplier=1,
+            custom_classes=custom_classes,
+            use_coco_classes=use_coco_classes,
+            folder_subsets={},
+            class_mapping_config=class_mapping_config,
+        )
+
+    create_dataset_yaml(test_path, custom_classes, use_coco_classes, class_mapping_config)
+    return total_train_frames, total_val_frames, total_test_frames + test_folder_frame_count

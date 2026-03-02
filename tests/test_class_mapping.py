@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 import tempfile
 import shutil
-from yolov8_training.utils.data_utils import (
+from trainer_core.dataprep.transforms import (
     apply_class_mapping_config,
     remap_labels_with_class_mapping,
 )

@@ -1,17 +1,19 @@
-# Waste Detection — YOLOv8 + DVC
+# Waste Detection — YOLO + RF-DETR + RTMDet + DVC
 
-This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
+This repository is the **waste-detection project/training repo**. It uses DVC (Data Version Control) to track datasets, experiments, and promoted baselines for reproducible model training.
+
+Training/evaluation is implemented by the Trainer Core pipeline (see `trainer_core/README.md`) and invoked via the project entrypoint in `projects/waste_detection/`.
 
 ### Why DVC here?
 
 - **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.
-- **Reproducibility:** The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
+- **Reproducibility:** The exact artifacts used for a run are pinned by DVC metadata (`*.dvc` files and, for pipeline runs, `dvc.lock`) and can be restored with `dvc pull`.
 
 
 > About this fork
 > - Task: waste detection
-> - Current classes (from params.yaml): `waste`, `cigarette` (to keep it focused for now and not introduce too many classes while we don't have much training data)
-> - Pipeline: Ultralytics YOLOv8 with DVC-managed data and outputs
+> - Current training classes: `waste`, `cigarette`, `leaves_dense`, `leaves_sparse`
+> - Pipeline: Ultralytics YOLO, RF-DETR, and RTMDet with DVC-managed data and outputs
 ---
 
 ## Table of Contents
@@ -19,12 +21,7 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 2. [Initial Project Setup](#initial-project-setup)
 3. [Managing Project Data](#managing-project-data)
 4. [Experiment Workflow](#experiment-workflow)
-5. [Custom Classes](#custom-classes)
-6. [Class Mapping](#class-mapping)
-7. [Raw Data Structure](#raw-data-structure)
-8. [Fine-tuning](#fine-tuning)
-9. [Folder Subsets](#folder-subsets)
-10. [Testing](#testing)
+5. [Core Pipeline Docs](#core-pipeline-docs)
 
 ---
 
@@ -32,9 +29,9 @@ This repository is a focused fork of our YOLO retraining template, specialized f
 
 This repo publishes trained models with each GitHub Release and also tracks the currently applied model via DVC.
 
-- Latest model (main): The model currently applied on the main branch is the one referenced in `dvc.lock` under the `runs/` output. To fetch it locally, run `dvc pull` (requires access to the configured DVC remote).
+- Latest baseline (main): The model currently applied on the main branch is tracked at `models/current_best/best.pt` (via `models/current_best/best.pt.dvc`). To fetch it locally, run `dvc pull models/current_best/best.pt` (requires access to the configured DVC remote).
 - Release assets: Each release includes the trained weights and metadata so you don’t need DVC to use the model:
-  - `weights/best.pt`: the promoted YOLO weights for inference
+  - `weights/best.pt`: the promoted weights for inference
   - `test_metrics.json`: evaluation metrics of the promoted run
   - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
 
@@ -44,13 +41,17 @@ The training pipeline loads a baseline model for comparison during evaluation:
 
 - **First tries:** `evaluation.baseline_weights_path` from params.yaml (defaults to `models/current_best/best.pt`)
 - **Then tries:** Fine-tune weights if in finetune mode
-- **Falls back to:** Official YOLOv8 COCO checkpoint (always works, even on fresh clones)
+- **Falls back to:** Official YOLO COCO checkpoint (always works, even on fresh clones)
+
+On fresh clones, `setup_project.py` creates a 0-byte placeholder at `models/current_best/best.pt` so DVC can track the baseline path as a direct file dependency. The pipeline ignores empty placeholders automatically; run `dvc pull` or export a real baseline to replace it.
+
+To keep startup errors understandable on fresh clones, the DVC pipeline includes a small preflight step (`check_optional_weight_deps`) that verifies configured optional weight paths exist before `train_model` / `evaluate_model`. If only `best.pt.dvc` exists but the local `best.pt` is not present yet, this step fails early with a clear message and points users to run `python setup_project.py` (for placeholders) or `dvc pull` (for real weights).
 
 When you want to make a freshly trained run the new comparison baseline:
 
 1. Export the run’s best weights (and optional metadata) into `models/current_best/`:
    ```bash
-   python yolov8_training/utils/export_baseline.py --run-dir runs/<experiment_name>
+   python tools/export_baseline.py --run-dir runs/<experiment_name>
    ```
    You can override the weights or metadata paths via CLI flags if needed.
 2. Track the updated files with DVC so others can fetch them:
@@ -93,6 +94,7 @@ The script will:
 * optionally ask for a comma-separated list of class names  
 * patch `.dvc/config` (remote URL) and `params.yaml` accordingly  
 * create the `raw_data/train` and `raw_data/test` folders
+* create 0-byte placeholder weight files for DVC's optional model dependencies
 
 **5. Commit the Initial Configuration**
    The bootstrap script modifies configuration files. Commit these changes to save the project setup.
@@ -141,31 +143,9 @@ After the initial setup, follow this process whenever you add or update the raw 
 
 This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
 
-### 1  Configure Parameters
+### Step 1: Configure Parameters
 
-All training parameters live in **`params.yaml`**.  
-Key fields:
-
-```yaml
-data:
-  dataset_name: waste-detection
-  experiment_name: waste-detection
-
-  # ↓ Optional — override COCO classes
-  custom_classes:
-    - "waste"
-    - "cigarette"
-  use_coco_classes: false     # fallback to COCO if true/empty
-
-train:
-  model_size: m
-  image_size: 1280
-  epochs: 50
-  batch_size: 8
-```
-
-* If `custom_classes` is non-empty, those names become class 0…n-1.  
-* If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
+All training parameters live in **`params.yaml`**. For the complete configuration reference (including backend-specific keys), see `trainer_core/README.md`.
 
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
@@ -210,181 +190,8 @@ Once you identify a superior experiment, promote it to become the official versi
 
 ---
 
-## Custom Classes
+## Core Pipeline Docs
 
-This fork is configured for waste detection. By default, the classes are defined in `params.yaml`:
+This repo vendors a generic training pipeline under `trainer_core/`. For full documentation (config reference, dataset importer, class mapping, folder subsets, fine-tuning, testing, backends), see:
 
-```yaml
-data:
-  custom_classes:
-    - waste
-    - cigarette
-  use_coco_classes: false
-```
-
-To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
-
----
-
-## Class Mapping
-
-The class mapping feature allows you to **merge multiple classes into one** during training and evaluation without modifying your raw data. This is useful for testing if combining similar classes improves detection performance.
-
-### How to Use
-
-Edit `params.yaml` to add a `class_mapping` configuration:
-
-```yaml
-data:
-  custom_classes:
-    - waste
-    - cigarette
-  use_coco_classes: false
-  
-  # Merge classes together during training
-  class_mapping:
-    waste: [waste, cigarette]  # Both will be treated as 'waste'
-```
-
-With this configuration:
-- Your raw data remains unchanged in `raw_data/`
-- During dataset preparation, labels are automatically remapped
-- The model trains with only 1 class: `waste`
-- All cigarette detections are treated as waste detections
-
-### Example: Testing Class Merging
-
-To test if merging `waste` and `cigarette` improves cigarette detection:
-
-1. Add the mapping to `params.yaml` as shown above
-2. Run the pipeline: `dvc repro` or `dvc exp run -n "merged-classes"`
-3. Compare results with your baseline (separate classes)
-4. Keep the mapping if results improve, otherwise revert it
-
-### More Examples
-
-**Multiple merge groups:**
-```yaml
-class_mapping:
-  recyclable: [plastic_bottle, glass_bottle, aluminum_can]
-  organic: [food_waste, paper]
-```
-
-**Partial mapping (keep some classes separate):**
-```yaml
-custom_classes: [waste, cigarette, person]
-class_mapping:
-  waste: [waste, cigarette]
-  # person remains separate
-```
-
-For detailed documentation, see [`docs/CLASS_MAPPING.md`](docs/CLASS_MAPPING.md).
-
-> **Note:** When importing datasets, the pipeline also automatically maps classes from source `data.yaml` files to your configured classes based on name matching.
-
----
-
-## Testing
-
-This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
-
-- Using unittest
-  - Run all tests:
-    ```bash
-    poetry run python -m unittest -v
-    ```
-
-- Using pytest (optional)
-  - Install dev dependencies once:
-    ```bash
-    poetry install --with dev
-    ```
-  - Run tests:
-    ```bash
-    poetry run pytest -q
-    ```
-
-Notes
-- The E2E test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
-- Tests run on CPU with a minimal YOLOv8n configuration and a single epoch to keep runtime low.
-
----
-
-## Raw Data Structure
-
-Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
-The importer now accepts **any** of the following:
-
-| # | Layout | What to do | Notes |
-|---|--------|------------|-------|
-| 1 | **CVAT YOLO export** | Drop the whole export folder (`data.yaml`, `images/`, `labels/`, `train.txt`). | `train.txt` is automatically parsed. |
-| 2 | **Standard YOLO** | Inside a subfolder create `images/` & `labels/`. | Class IDs will be remapped if needed. |
-| 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
-| 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
-
-> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
-> The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
-
-Example scene‑based layout:
-
-```
-raw_data/
-└── test/
-    ├── Wolfsburg/
-    │   ├── images/
-    │   └── labels/
-    └── Carmel/
-        ├── images/
-        └── labels/
-```
-
-## Fine-tuning
-
-You can fine-tune from a pre-trained checkpoint (e.g., a prior waste model) instead of starting from the base YOLOv8 weights.
-
-Configure in `params.yaml` under `train`:
-
-```yaml
-train:
-  finetune_mode: true              # enable fine-tuning
-  pretrained_model_path: taco-uav-model.pt
-  finetune_lr: 0.0001              # lower LR for fine-tuning
-  finetune_epochs: 60              # optional override for epochs
-  freeze_backbone: false           # optionally freeze early layers
-```
-
-Notes:
-- When fine-tuning, the pipeline evaluates the chosen pretrained model as the baseline and compares it to the fine-tuned result.
-- The DVC pipeline depends on `pretrained_model_path` so runs are reproducible. Make sure the file is available (via DVC or local path).
-
----
-
-## Folder Subsets
-
-To limit or oversample specific source folders during dataset preparation, use `prepare.folder_subsets` in `params.yaml` or the CLI override.
-
-Example `params.yaml` configuration:
-
-```yaml
-prepare:
-  val_split: 0.1
-  test_split: 0.1
-  augment_multiplier: 1
-  folder_subsets:
-    uavvaste: 0.5        # use 50% of images from this folder
-    taco: 0.2            # use 20%
-    cw32-08-07-train: 2  # 200% = oversample
-```
-
-CLI override (multiple allowed):
-
-```bash
-python yolov8_training/train_pipeline.py \
-  --stage prepare -d waste-detection \
-  --folder-subset uavvaste 0.5 \
-  --folder-subset cw32-08-07-train 2.0
-```
-
-Behavior:
-- Ratios between 0 and 1.0 subsample a folder.
-- Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn’t leak duplicates between sources.
+- `trainer_core/README.md`

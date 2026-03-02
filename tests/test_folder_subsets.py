@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import pytest
 
-from yolov8_training.utils.data_utils import process_single_images
+from trainer_core.dataprep.transforms import process_single_images
 
 
 pytestmark = [

@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 from typing import NamedTuple
 
-from yolov8_training.utils.data_utils import process_single_images, create_dataset_yaml
-from yolov8_training.train_pipeline import train_model
+from trainer_core.dataprep.transforms import process_single_images, create_dataset_yaml
+from trainer_core.backends.yolo import train_model
 
 
 class SourceDataset(NamedTuple):
@@ -160,7 +160,7 @@ def test_train_model_minimal(tmp_path: Path, source_dataset: SourceDataset):
     # Try a minimal training run
     model, results, train_output_dir = train_model(
         dataset_path=dataset_dir,
-        model_size="n",  # Use smallest model
+        checkpoint="yolov8n.pt",  # Use smallest model
         image_size=320,  # Use small image size for faster test
         batch_size=1,
         experiment_name="test_experiment",

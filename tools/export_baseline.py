@@ -1,7 +1,6 @@
 import argparse
 import shutil
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -113,6 +112,19 @@ def export_baseline(args):
         metadata_to_write["tag"] = args.tag
 
     baseline_metadata_path = baseline_dir / "metadata.yaml"
+
+    # Keep MMDetection baselines self-contained by copying the config file next to weights.
+    if str(metadata_to_write.get("model_backend", "")).strip().lower() == "mmdet":
+        config_candidate = _resolve_path(metadata_to_write.get("model_config_path"))
+        if config_candidate and config_candidate.exists():
+            baseline_config_path = baseline_dir / "model_config.py"
+            shutil.copy2(config_candidate, baseline_config_path)
+            metadata_to_write["model_config_path"] = str(baseline_config_path)
+        elif run_dir and (run_dir / "model_config.py").exists():
+            baseline_config_path = baseline_dir / "model_config.py"
+            shutil.copy2(run_dir / "model_config.py", baseline_config_path)
+            metadata_to_write["model_config_path"] = str(baseline_config_path)
+
     with open(baseline_metadata_path, "w") as f:
         yaml.safe_dump(metadata_to_write, f, sort_keys=False)
 
@@ -170,4 +182,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

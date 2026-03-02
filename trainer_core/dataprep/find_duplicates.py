@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Set, NamedTuple
 
 import cv2
 import imagehash
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from skimage.metrics import structural_similarity as ssim
 
 
@@ -104,7 +104,7 @@ class DuplicateDetector:
         try:
             with Image.open(file_path) as img:
                 return file_path, str(imagehash.phash(img))
-        except Exception:
+        except (OSError, UnidentifiedImageError, ValueError):
             return file_path, None  # unreadable / unsupported image
 
     @staticmethod
@@ -124,7 +124,7 @@ class DuplicateDetector:
             img2 = cv2.resize(img2, (256, 256))
             score, _ = ssim(img1, img2, full=True)
             return score
-        except Exception:
+        except (cv2.error, OSError, ValueError):
             return 0.0
 
 

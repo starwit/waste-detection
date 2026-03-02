@@ -16,12 +16,3 @@ class ProcessedFolder(NamedTuple):
     empty_label_count: int
     # For CVAT processing we also track skipped images; defaults to 0 otherwise
     skip_count: int = 0
-
-
-class SplitData(NamedTuple):
-    """Split result for train/val images and labels."""
-    train_images: List[Path]
-    train_labels: List[Path]
-    val_images: List[Path]
-    val_labels: List[Path]
-
