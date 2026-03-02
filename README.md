@@ -6,6 +6,19 @@ Training/evaluation is implemented by the external Trainer Core package (`object
 DVC stages call `python -m train` plus `python -m trainer_core.pipeline.check_optional_weight_deps` for preflight checks.
 The project pipeline wrapper injects project-local defaults for `--workspace-root` and `--config` (`params.yaml`) so `trainer_core` can be consumed as a dependency without relying on shell cwd. If no `--stage` is provided, it defaults to `train`.
 
+Note on RTMDet dependencies:
+- This project installs `object-detector-trainer` with RTMDet extras enabled.
+- RTMDet/OpenMMLab currently works reliably with Python 3.11.
+- If your machine defaults to Python 3.12 and install fails on `mmcv`, create/select a 3.11 Poetry env first (`poetry env use 3.11`).
+
+Testing split:
+- Project-level tests in this repo:
+  - fast contract tests: `poetry run pytest`
+  - heavy DVC integration tests: `poetry run pytest --heavy`
+- Trainer backend-heavy tests live in `object-detector-trainer`.
+- Ensure trainer deps are installed first (`poetry -C ../object-detector-trainer install`).
+- From this project root, run trainer heavy tests via: `poetry -C ../object-detector-trainer run pytest -m heavy`.
+
 ### Why DVC here?
 
 - **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.

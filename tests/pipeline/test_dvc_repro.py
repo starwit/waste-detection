@@ -105,7 +105,7 @@ def _load_results_models(workspace: Path) -> list[str]:
 
 def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Path) -> None:
     """Changing finetune weights path in params must rerun `train_model`."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
@@ -182,7 +182,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
 
 def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) -> None:
     """Fresh clone contract: missing promoted baseline must not block `train_model`."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
@@ -230,7 +230,7 @@ def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) ->
 
 def test_dvc_train_model_finetune_requires_existing_weights(tmp_path: Path) -> None:
     """If finetune is enabled and weights are missing, `train_model` must fail clearly."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
@@ -276,7 +276,7 @@ def test_dvc_train_model_finetune_requires_existing_weights(tmp_path: Path) -> N
 
 def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) -> None:
     """If finetune is enabled and weights exist, `train_model` must succeed."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
@@ -319,7 +319,7 @@ def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) ->
 
 def test_dvc_full_pipeline_fresh_project_without_baseline(tmp_path: Path) -> None:
     """Fresh project contract: full DVC pipeline runs without promoted baseline files."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
@@ -374,7 +374,7 @@ def test_dvc_full_pipeline_fresh_project_without_baseline(tmp_path: Path) -> Non
 
 def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Path) -> None:
     """Existing project contract: full DVC pipeline uses promoted baseline cleanly."""
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
