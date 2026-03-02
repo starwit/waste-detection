@@ -16,16 +16,49 @@ import textwrap
 
 from ruamel.yaml import YAML
 
-from trainer_core.pipeline.check_optional_weight_deps import (
-    ensure_optional_weight_placeholders,
-)
-
 ROOT = pathlib.Path(__file__).resolve().parents[0]
 CONFIG_FILE = ROOT / ".dvc" / "config"
 PARAMS_FILE = ROOT / "params.yaml"
 
 REMOTE_SEC = '\'remote "dvc-hetzner"\''
 BASE_URL = "ssh://u420375-sub1.your-storagebox.de"
+
+
+def _resolve_optional_path(repo_root: pathlib.Path, raw: object) -> pathlib.Path | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    candidate = pathlib.Path(text).expanduser()
+    return candidate if candidate.is_absolute() else repo_root / candidate
+
+
+def ensure_optional_weight_placeholders(root: pathlib.Path) -> None:
+    params_file = root / "params.yaml"
+    if not params_file.exists():
+        return
+
+    yaml = YAML(typ="safe")
+    with params_file.open("r", encoding="utf-8") as handle:
+        params = yaml.load(handle) or {}
+    if not isinstance(params, dict):
+        return
+
+    finetune_cfg = (params.get("train") or {}).get("finetune") or {}
+    raw_paths = (
+        (params.get("evaluation") or {}).get("baseline_weights_path"),
+        finetune_cfg.get("weights"),
+    )
+
+    seen: set[pathlib.Path] = set()
+    for raw_path in raw_paths:
+        path = _resolve_optional_path(root, raw_path)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            continue
+        path.touch()
 
 
 def prompt(question: str, *, default: str | None = None) -> str:

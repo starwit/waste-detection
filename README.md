@@ -2,7 +2,7 @@
 
 This repository is the **waste-detection project/training repo**. It uses DVC (Data Version Control) to track datasets, experiments, and promoted baselines for reproducible model training.
 
-Training/evaluation is implemented by the Trainer Core pipeline (see `trainer_core/README.md`) and invoked via the project entrypoint `train.py`.
+Training/evaluation is implemented by the external Trainer Core package (`object-detector-trainer`) and invoked via the project entrypoint `train.py`.
 DVC stages call `python -m train` plus `python -m trainer_core.pipeline.check_optional_weight_deps` for preflight checks.
 The project pipeline wrapper injects project-local defaults for `--workspace-root` and `--config` (`params.yaml`) so `trainer_core` can be consumed as a dependency without relying on shell cwd. If no `--stage` is provided, it defaults to `train`.
 
@@ -147,7 +147,9 @@ This project uses a structured workflow for training and promoting models. The k
 
 ### Step 1: Configure Parameters
 
-All training parameters live in **`params.yaml`**. For the complete configuration reference (including backend-specific keys), see `trainer_core/README.md`.
+All training parameters live in **`params.yaml`**. For the complete configuration reference (including backend-specific keys), see:
+
+- https://github.com/starwit/object-detector-trainer
 
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
@@ -194,6 +196,6 @@ Once you identify a superior experiment, promote it to become the official versi
 
 ## Core Pipeline Docs
 
-This repo vendors a generic training pipeline under `trainer_core/`. For full documentation (config reference, dataset importer, class mapping, folder subsets, fine-tuning, testing, backends), see:
+The training core lives in a separate repository and is imported as a dependency:
 
-- `trainer_core/README.md`
+- https://github.com/starwit/object-detector-trainer

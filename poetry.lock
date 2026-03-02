@@ -34,6 +34,18 @@ test-trackers = ["comet-ml", "dvclive", "matplotlib", "swanlab[dashboard]", "ten
 testing = ["bitsandbytes", "datasets", "diffusers", "evaluate", "parameterized", "pytest (>=7.2.0)", "pytest-order", "pytest-subtests", "pytest-xdist", "scikit-learn", "scipy", "timm", "torchdata (>=0.8.0)", "torchpippy (>=0.2.0)", "tqdm", "transformers"]
 
 [[package]]
+name = "addict"
+version = "2.4.0"
+description = "Addict is a dictionary whose items can be set using both attribute and item syntax."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "addict-2.4.0-py3-none-any.whl", hash = "sha256:249bb56bbfd3cdc2a004ea0ff4c2b6ddc84d53bc2194761636eb314d5cfa5dfc"},
+    {file = "addict-2.4.0.tar.gz", hash = "sha256:b3b2210e0e067a281f5646c8c5db92e99b7231ea8b0eb5f74dbdf9e259d4e494"},
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 description = "Happy Eyeballs for asyncio"
@@ -1268,24 +1280,6 @@ files = [
 ]
 
 [[package]]
-name = "ffmpeg-python"
-version = "0.2.0"
-description = "Python bindings for FFmpeg - with complex filtering support"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "ffmpeg-python-0.2.0.tar.gz", hash = "sha256:65225db34627c578ef0e11c8b1eb528bb35e024752f6f10b78c011f6f64c4127"},
-    {file = "ffmpeg_python-0.2.0-py3-none-any.whl", hash = "sha256:ac441a0404e053f8b6a1113a77c0f452f1cfc62f6344a769475ffdc0f56c23c5"},
-]
-
-[package.dependencies]
-future = "*"
-
-[package.extras]
-dev = ["Sphinx (==2.1.0)", "future (==0.17.1)", "numpy (==1.16.4)", "pytest (==4.6.1)", "pytest-mock (==1.10.4)", "tox (==3.12.1)"]
-
-[[package]]
 name = "filelock"
 version = "3.19.1"
 description = "A platform independent file lock."
@@ -1577,18 +1571,6 @@ groups = ["main"]
 files = [
     {file = "funcy-2.0-py2.py3-none-any.whl", hash = "sha256:53df23c8bb1651b12f095df764bfb057935d49537a56de211b098f4c79614bb0"},
     {file = "funcy-2.0.tar.gz", hash = "sha256:3963315d59d41c6f30c04bc910e10ab50a3ac4a225868bfa96feed133df075cb"},
-]
-
-[[package]]
-name = "future"
-version = "1.0.0"
-description = "Clean single-source support for Python 3 and 2"
-optional = false
-python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
-groups = ["main"]
-files = [
-    {file = "future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216"},
-    {file = "future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05"},
 ]
 
 [[package]]
@@ -2270,6 +2252,92 @@ files = [
 ]
 
 [[package]]
+name = "mmcv"
+version = "2.2.0"
+description = "OpenMMLab Computer Vision Foundation"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "mmcv-2.2.0.tar.gz", hash = "sha256:ac479247e808d8802f89eadf04d4118de86bdfe81361ec5aed0cc1bf731c67c9"},
+]
+
+[package.dependencies]
+addict = "*"
+mmengine = ">=0.3.0"
+numpy = "*"
+opencv-python = ">=3"
+packaging = "*"
+Pillow = "*"
+pyyaml = "*"
+regex = {version = "*", markers = "sys_platform == \"win32\""}
+yapf = "*"
+
+[package.extras]
+all = ["Pillow", "PyTurboJPEG", "addict", "coverage", "lmdb", "mmengine (>=0.3.0)", "ninja", "numpy", "onnx", "onnxoptimizer", "onnxruntime", "packaging", "psutil", "pytest", "pytest-runner", "pyyaml", "regex ; sys_platform == \"win32\"", "scipy", "tifffile", "yapf"]
+build = ["pytest-runner"]
+optional = ["ninja", "psutil"]
+tests = ["PyTurboJPEG", "coverage", "lmdb", "onnx", "onnxoptimizer", "onnxruntime", "pytest", "scipy", "tifffile"]
+
+[[package]]
+name = "mmdet"
+version = "3.3.0"
+description = "OpenMMLab Detection Toolbox and Benchmark"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "mmdet-3.3.0-py3-none-any.whl", hash = "sha256:2e23e291281ac57e7dccf8678e957da45fbe560ce78a1f5ded6afeccd3730f17"},
+    {file = "mmdet-3.3.0.tar.gz", hash = "sha256:fe8cc2685d60a2a4f2530a4e92aa6269fe45af93265303a31bf4ea463eb3164f"},
+]
+
+[package.dependencies]
+matplotlib = "*"
+numpy = "*"
+pycocotools = "*"
+scipy = "*"
+shapely = "*"
+six = "*"
+terminaltables = "*"
+tqdm = "*"
+
+[package.extras]
+all = ["cityscapesscripts", "cython", "emoji", "fairscale", "imagecorruptions", "matplotlib", "numpy", "pycocotools", "scikit-learn", "scipy", "shapely", "six", "terminaltables", "tqdm"]
+build = ["cython", "numpy"]
+mim = ["mmcv (>=2.0.0rc4,<2.2.0)", "mmengine (>=0.7.1,<1.0.0)"]
+multimodal = ["fairscale", "jsonlines", "nltk", "pycocoevalcap", "transformers"]
+optional = ["cityscapesscripts", "emoji", "fairscale", "imagecorruptions", "scikit-learn"]
+tests = ["asynctest", "cityscapesscripts", "codecov", "flake8", "imagecorruptions", "instaboostfast", "interrogate", "isort (==4.3.21)", "kwarray", "memory-profiler", "mmtrack", "nltk", "onnx (==1.7.0)", "onnxruntime (>=1.8.0)", "parameterized", "prettytable", "protobuf (<=3.20.1)", "psutil", "pytest", "transformers", "ubelt", "xdoctest (>=0.10.0)", "yapf"]
+tracking = ["mmpretrain", "motmetrics", "numpy (<1.24.0)", "scikit-learn", "seaborn"]
+
+[[package]]
+name = "mmengine"
+version = "0.10.7"
+description = "Engine of OpenMMLab projects"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "mmengine-0.10.7-py3-none-any.whl", hash = "sha256:262ac976a925562f78cd5fd14dd1bc9b680ed0aa81f0d85b723ef782f99c54ee"},
+    {file = "mmengine-0.10.7.tar.gz", hash = "sha256:d20ffcc31127567e53dceff132612a87f0081de06cbb7ab2bdb7439125a69225"},
+]
+
+[package.dependencies]
+addict = "*"
+matplotlib = "*"
+numpy = "*"
+opencv-python = ">=3"
+pyyaml = "*"
+regex = {version = "*", markers = "sys_platform == \"win32\""}
+rich = "*"
+termcolor = "*"
+yapf = "*"
+
+[package.extras]
+all = ["addict", "aim (<=3.17.5) ; sys_platform != \"win32\"", "bitsandbytes", "clearml", "coverage", "dadaptation", "dvclive", "lion-pytorch", "lmdb", "matplotlib", "mlflow", "numpy", "parameterized", "pydantic (==1.10.9)", "pytest", "pyyaml", "regex ; sys_platform == \"win32\"", "rich", "termcolor", "transformers", "yapf"]
+tests = ["aim (<=3.17.5) ; sys_platform != \"win32\"", "bitsandbytes", "clearml", "coverage", "dadaptation", "dvclive", "lion-pytorch", "lmdb", "mlflow", "parameterized", "pydantic (==1.10.9)", "pytest", "transformers"]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 description = "Python library for arbitrary-precision floating-point arithmetic"
@@ -2735,6 +2803,51 @@ files = [
 ]
 
 [[package]]
+name = "object-detector-trainer"
+version = "0.1.0"
+description = "Reusable multi-backend object detection training core"
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+files = []
+develop = false
+
+[package.dependencies]
+albumentations = ">=1.4.10"
+imagehash = ">=4.3.1"
+imgaug = ">=0.4.0"
+matplotlib = ">=3.9.0"
+mmcv = {version = ">=2.0.0", optional = true}
+mmdet = {version = ">=3.0.0", optional = true}
+mmengine = {version = ">=0.10.0", optional = true}
+numpy = ">=2.2.0"
+opencv-python = ">=4.10.0.84"
+pandas = ">=2.2.3"
+pillow = ">=11.0.0"
+pycocotools = ">=2.0.11"
+pydantic = ">=2.11.0"
+pyyaml = ">=6.0.2"
+rfdetr = ">=1.4.1"
+ruamel-yaml = ">=0.18.14"
+scikit-image = ">=0.25.0"
+scikit-learn = ">=1.5.0"
+supervision = ">=0.22.0"
+tabulate = ">=0.9.0"
+torch = ">=2.0.0"
+tqdm = ">=4.67.1"
+ultralytics = "8.3.191"
+
+[package.extras]
+dev = ["pytest (>=8.2.0)"]
+rtmdet = ["mmcv (>=2.0.0)", "mmdet (>=3.0.0)", "mmengine (>=0.10.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/starwit/object-detector-trainer.git"
+reference = "feature/AB#2137-refactor-training-pipeline"
+resolved_reference = "bf9aeb4c47e8fa12d45643eaffe6251597d4175c"
+
+[[package]]
 name = "omegaconf"
 version = "2.3.0"
 description = "A flexible configuration library"
@@ -2769,8 +2882,8 @@ files = [
 
 [package.dependencies]
 numpy = [
+    {version = ">=1.23.5", markers = "python_version >= \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
-    {version = ">=1.23.5", markers = "python_version == \"3.11\""},
 ]
 
 [[package]]
@@ -2792,8 +2905,8 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.5", markers = "python_version >= \"3.11\""},
+    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
 ]
 
 [[package]]
@@ -2956,8 +3069,8 @@ files = [
 
 [package.dependencies]
 numpy = [
-    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.2", markers = "python_version == \"3.11\""},
+    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -5097,6 +5210,33 @@ files = [
 widechars = ["wcwidth"]
 
 [[package]]
+name = "termcolor"
+version = "3.3.0"
+description = "ANSI color formatting for output in terminal"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "termcolor-3.3.0-py3-none-any.whl", hash = "sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5"},
+    {file = "termcolor-3.3.0.tar.gz", hash = "sha256:348871ca648ec6a9a983a13ab626c0acce02f515b9e1983332b17af7979521c5"},
+]
+
+[package.extras]
+tests = ["pytest", "pytest-cov"]
+
+[[package]]
+name = "terminaltables"
+version = "3.1.10"
+description = "Generate simple tables in terminals from a nested list of strings."
+optional = false
+python-versions = ">=2.6"
+groups = ["main"]
+files = [
+    {file = "terminaltables-3.1.10-py2.py3-none-any.whl", hash = "sha256:e4fdc4179c9e4aab5f674d80f09d76fa436b96fdc698a8505e0a36bf0804a874"},
+    {file = "terminaltables-3.1.10.tar.gz", hash = "sha256:ba6eca5cb5ba02bba4c9f4f985af80c54ec3dccf94cfcd190154386255e47543"},
+]
+
+[[package]]
 name = "threadpoolctl"
 version = "3.6.0"
 description = "threadpoolctl"
@@ -5578,6 +5718,21 @@ files = [
 ]
 
 [[package]]
+name = "yapf"
+version = "0.43.0"
+description = "A formatter for Python code"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "yapf-0.43.0-py3-none-any.whl", hash = "sha256:224faffbc39c428cb095818cf6ef5511fdab6f7430a10783fdfb292ccf2852ca"},
+    {file = "yapf-0.43.0.tar.gz", hash = "sha256:00d3aa24bfedff9420b2e0d5d9f5ab6d9d4268e72afbf59bb3fa542781d5218e"},
+]
+
+[package.dependencies]
+platformdirs = ">=3.5.1"
+
+[[package]]
 name = "yarl"
 version = "1.20.1"
 description = "Yet another URL library"
@@ -5717,4 +5872,4 @@ test = ["zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "26712d7cfe1f4126f8e33bf6167b69836037d0a9eb02ac38c24eef4bafee0eed"
+content-hash = "941740025ee8e17b6ca9a10f780cef3680b094eaae63b778442adcfacbabf86b"

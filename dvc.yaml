@@ -6,7 +6,6 @@ stages:
   check_optional_weight_deps:
     cmd: python -m trainer_core.pipeline.check_optional_weight_deps
     deps:
-      - trainer_core/pipeline/check_optional_weight_deps.py
       - params.yaml
       - pyproject.toml
       - poetry.lock
@@ -27,7 +26,6 @@ stages:
       - prepare
     deps:
       - train.py
-      - trainer_core/
       - pyproject.toml
       - poetry.lock
       - raw_data/
@@ -48,7 +46,6 @@ stages:
       - evaluation.baseline_weights_path
     deps:
       - train.py
-      - trainer_core/
       - pyproject.toml
       - poetry.lock
       - .tmp/dvc_bootstrap.txt
@@ -73,7 +70,6 @@ stages:
       - prepare.auto_replay
     deps:
       - train.py
-      - trainer_core/
       - pyproject.toml
       - poetry.lock
       - .tmp/dvc_bootstrap.txt

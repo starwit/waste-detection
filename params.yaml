@@ -88,48 +88,48 @@ models:
     checkpoint: yolo11m.pt
 
   rtmdet-tiny:
-    backend: mmdet
+    backend: rtmdet
     config_name: rtmdet_tiny_8xb32-300e_coco
     epochs: 100
     batch_size: 4
     image_size: 1280
-    cache_dir: models/pretrained/mmdet
+    cache_dir: models/pretrained/rtmdet
     allow_download: true
 
   rtmdet-s:
-    backend: mmdet
+    backend: rtmdet
     config_name: rtmdet_s_8xb32-300e_coco
     epochs: 100
     batch_size: 4
     image_size: 1280
-    cache_dir: models/pretrained/mmdet
+    cache_dir: models/pretrained/rtmdet
     allow_download: true
 
   rtmdet-m:
-    backend: mmdet
+    backend: rtmdet
     config_name: rtmdet_m_8xb32-300e_coco
     epochs: 100
     batch_size: 4
     image_size: 1280
-    cache_dir: models/pretrained/mmdet
+    cache_dir: models/pretrained/rtmdet
     allow_download: true
 
   rtmdet-l:
-    backend: mmdet
+    backend: rtmdet
     config_name: rtmdet_l_8xb32-300e_coco
     epochs: 100
     batch_size: 2
     image_size: 1280
-    cache_dir: models/pretrained/mmdet
+    cache_dir: models/pretrained/rtmdet
     allow_download: true
 
   rtmdet-x:
-    backend: mmdet
+    backend: rtmdet
     config_name: rtmdet_x_8xb32-300e_coco
     epochs: 100
     batch_size: 2
     image_size: 1280
-    cache_dir: models/pretrained/mmdet
+    cache_dir: models/pretrained/rtmdet
     allow_download: true
 
   rfdetr-medium:

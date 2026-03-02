@@ -51,13 +51,13 @@ BASE_PARAMS: Dict[str, Any] = {
             "grad_accum_steps": 1,
         },
         "rtmdet-tiny": {
-            "backend": "mmdet",
+            "backend": "rtmdet",
             "config_name": "rtmdet_tiny_8xb32-300e_coco",
             "epochs": 1,
             "batch_size": 1,
             "image_size": 320,
             "allow_download": False,
-            "cache_dir": "models/pretrained/mmdet",
+            "cache_dir": "models/pretrained/rtmdet",
         },
     },
     "evaluation": {

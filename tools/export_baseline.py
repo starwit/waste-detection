@@ -115,7 +115,7 @@ def export_baseline(args):
 
     # Keep MMDetection baselines self-contained by copying the config file next to weights.
     model_backend = str(metadata_to_write.setdefault("model_backend", "")).strip().lower()
-    if model_backend == "mmdet":
+    if model_backend in {"rtmdet", "mmdet"}:
         baseline_config_path: Path | None = None
 
         config_candidate = _resolve_path(metadata_to_write.get("model_config_path"))
