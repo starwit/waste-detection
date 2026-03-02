@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import csv
-import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
+
+from trainer_core.utils.path_ops import link_or_copy
 
 
 @dataclass
@@ -100,16 +101,6 @@ def _match_and_score(preds: List[Box], gts: List[Box], iou_thr: float, conf_thr:
     return fn, fp, borderline
 
 
-def _link_or_copy(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.link(src, dst)
-    except OSError:
-        import shutil
-
-        shutil.copy2(src, dst)
-
-
 def _append_index(index_csv: Path, rows: List[dict]) -> None:
     index_csv.parent.mkdir(parents=True, exist_ok=True)
     header = [
@@ -188,9 +179,9 @@ def update_replay_folder(
         out_lbl = labels_out / lbl_name
 
         if not out_img.exists():
-            _link_or_copy(img_path, out_img)
+            link_or_copy(img_path, out_img)
         if not out_lbl.exists() and lbl_path.exists():
-            _link_or_copy(lbl_path, out_lbl)
+            link_or_copy(lbl_path, out_lbl)
         added_rows.append(
             {
                 "run_id": run_id,

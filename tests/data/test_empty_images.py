@@ -15,7 +15,8 @@ import numpy as np
 import pytest
 from typing import NamedTuple
 
-from trainer_core.dataprep.transforms import process_single_images, create_dataset_yaml
+from trainer_core.dataprep.dataset_builder import process_single_images
+from trainer_core.dataprep.dataset_yaml import create_dataset_yaml
 from trainer_core.backends.yolo import train_model
 
 

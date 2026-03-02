@@ -1,22 +1,31 @@
 from __future__ import annotations
 
 import io
+import logging
 import sys
-import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
-from trainer_core.wrappers.shared import (
+from trainer_core.wrappers.prediction_types import (
     CocoEvalResults as _CocoEvalResults,
     PredictionResult as _PredictionResult,
     ValMetrics as _ValMetrics,
+)
+from trainer_core.wrappers.prediction_utils import (
     build_prediction_result,
-    load_dataset_yaml as _load_dataset_yaml,
     load_image,
+)
+from trainer_core.wrappers.yolo_eval import (
+    compute_coco_metrics as _compute_coco_metrics_base,
+    evaluate_yolo_dataset as _evaluate_yolo_dataset,
+    load_dataset_yaml as _load_dataset_yaml,
     parse_class_names as _parse_class_names,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _default_infer_fn(model: Any, image: np.ndarray):
@@ -130,15 +139,7 @@ def _coco_eval_pycocotools(
     return _CocoEvalResults(precision, recall, map50, map50_95, per_class, macro_f1=macro_f1)
 
 
-def _compute_coco_metrics(
-    images: list[dict],
-    annotations: list[dict],
-    detections: list[dict],
-    categories: list[dict],
-) -> _CocoEvalResults:
-    if len(images) == 0:
-        return _CocoEvalResults(0.0, 0.0, 0.0, 0.0, {}, macro_f1=0.0)
-    return _coco_eval_pycocotools(images, annotations, detections, categories)
+_compute_coco_metrics = partial(_compute_coco_metrics_base, eval_fn=_coco_eval_pycocotools)
 
 
 class RTMDetModelAdapter:
@@ -219,102 +220,36 @@ class RTMDetModelAdapter:
 
         imgsz = kwargs.get("imgsz")
         if imgsz is not None and int(imgsz) != int(self.resolution):
-            print(
-                f"Warning: RTMDet adapter ignores imgsz={int(imgsz)}; "
-                f"using resolution={self.resolution}."
+            logger.warning(
+                "RTMDet adapter ignores imgsz=%s; using resolution=%s.",
+                int(imgsz),
+                self.resolution,
             )
-
-        ds_cfg = _load_dataset_yaml(data)
-        if "path" not in ds_cfg:
-            raise ValueError(f"Dataset YAML at {data} is missing required 'path'.")
-        dataset_path = Path(ds_cfg["path"])
-        val_rel = ds_cfg.get("val", "val/images")
-        images_dir = dataset_path / val_rel
-        labels_dir = images_dir.parent / "labels"
-
-        class_names = _parse_class_names(ds_cfg)
-        valid_class_ids = set(int(k) for k in class_names.keys())
 
         conf_threshold = float(kwargs.get("conf", 0.001))
         classes_filter: set[int] | None = None
         if kwargs.get("classes") is not None:
             classes_filter = {int(c) for c in kwargs["classes"]}
 
-        gt_images: list[dict] = []
-        gt_annotations: list[dict] = []
-        dt_results: list[dict] = []
-        ann_id = 1
-        image_id = 0
-        total_inference_ms = 0.0
+        ds_cfg = _load_dataset_yaml(data)
+        class_names = _parse_class_names(ds_cfg)
+        valid_class_ids = set(int(k) for k in class_names.keys())
 
-        image_files = sorted(
-            p for p in images_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
-        ) if images_dir.exists() else []
-
-        for img_path in image_files:
-            img = cv2.imread(str(img_path))
-            if img is None:
-                continue
-            image_id += 1
-            height, width = img.shape[:2]
-            gt_images.append(
-                {"id": image_id, "file_name": img_path.name, "width": width, "height": height}
+        def _infer_fn(img: np.ndarray, _threshold: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            bboxes, scores, labels = _extract_prediction_arrays(self._infer_fn(self._model, img))
+            return (
+                np.asarray(bboxes, dtype=np.float32),
+                np.asarray(scores, dtype=np.float32),
+                np.asarray(labels, dtype=np.int64),
             )
 
-            label_path = labels_dir / f"{img_path.stem}.txt"
-            if label_path.exists():
-                with open(label_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) < 5:
-                            continue
-                        try:
-                            cls_id = int(float(parts[0]))
-                            cx = float(parts[1])
-                            cy = float(parts[2])
-                            bw = float(parts[3])
-                            bh = float(parts[4])
-                        except ValueError:
-                            continue
-                        if classes_filter and cls_id not in classes_filter:
-                            continue
-                        x = (cx - bw / 2.0) * width
-                        y = (cy - bh / 2.0) * height
-                        box_w = bw * width
-                        box_h = bh * height
-                        gt_annotations.append(
-                            {
-                                "id": ann_id,
-                                "image_id": image_id,
-                                "category_id": cls_id,
-                                "bbox": [x, y, box_w, box_h],
-                                "area": box_w * box_h,
-                                "iscrowd": 0,
-                            }
-                        )
-                        ann_id += 1
-
-            t0 = time.time()
-            bboxes, scores, labels = _extract_prediction_arrays(self._infer_fn(self._model, img))
-            t1 = time.time()
-            total_inference_ms += (t1 - t0) * 1000.0
-
-            keep = scores >= conf_threshold
-            if classes_filter is not None:
-                keep = keep & np.array([int(c) in classes_filter for c in labels], dtype=bool)
-            else:
-                keep = keep & np.array([int(c) in valid_class_ids for c in labels], dtype=bool)
-
-            for box, score, cls_id in zip(bboxes[keep], scores[keep], labels[keep]):
-                x1, y1, x2, y2 = box.tolist()
-                dt_results.append(
-                    {
-                        "image_id": image_id,
-                        "category_id": int(cls_id),
-                        "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
-                        "score": float(score),
-                    }
-                )
+        gt_images, gt_annotations, dt_results, class_names, avg_inference = _evaluate_yolo_dataset(
+            data=data,
+            conf_threshold=conf_threshold,
+            classes_filter=classes_filter,
+            valid_class_ids=valid_class_ids,
+            infer_fn=_infer_fn,
+        )
 
         categories = [{"id": cls_id, "name": name} for cls_id, name in class_names.items()]
         coco_metrics = _compute_coco_metrics(gt_images, gt_annotations, dt_results, categories)
@@ -329,7 +264,6 @@ class RTMDetModelAdapter:
             "metrics/f1(B)": float(macro_f1),
         }
         fitness = 0.1 * float(map50) + 0.9 * float(map50_95)
-        avg_inference = total_inference_ms / max(image_id, 1)
         return _ValMetrics(
             results_dict=results_dict,
             fitness=fitness,

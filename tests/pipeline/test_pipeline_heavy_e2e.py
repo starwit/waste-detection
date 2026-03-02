@@ -12,10 +12,18 @@ from pathlib import Path
 
 import pytest
 
+from trainer_core.pipeline.evaluate_stage import run_evaluate_stage
+from trainer_core.pipeline.prepare_stage import run_prepare_stage
+from trainer_core.pipeline.train_stage import run_train_stage
 from tests.pipeline_test_utils import build_args, create_minimal_dataset, write_params_yaml
-from projects.waste_detection.pipeline import run_prepare_stage, run_train_eval_stage
 
 pytestmark = pytest.mark.heavy
+
+
+def run_train_eval_stage(args):
+    train_result = run_train_stage(args)
+    run_evaluate_stage(args, train_result=train_result)
+    return train_result
 
 
 def _require_repo_weight(filename: str) -> Path:

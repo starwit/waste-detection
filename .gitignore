@@ -49,3 +49,6 @@ WAS_videos/
 .tmp
 
 *output*/
+
+
+.venv/*

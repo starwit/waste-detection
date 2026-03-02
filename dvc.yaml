@@ -4,17 +4,19 @@ stages:
   # setup_project.py creates 0-byte placeholders for these paths on fresh clones so
   # DVC dependency checks stay deterministic and failures are explicit/actionable.
   check_optional_weight_deps:
-    cmd: python trainer_core/pipeline/check_optional_weight_deps.py
+    cmd: python -m trainer_core.pipeline.check_optional_weight_deps
     deps:
       - trainer_core/pipeline/check_optional_weight_deps.py
       - params.yaml
+      - pyproject.toml
+      - poetry.lock
     outs:
       - .tmp/dvc_bootstrap.txt
     always_changed: true
 
   prepare_data:
     cmd: >
-      python -m projects.waste_detection.pipeline --stage prepare
+      python -m train --stage prepare
       --dataset-name ${data.dataset_name}
       --val-split ${prepare.val_split}
       --test-split ${prepare.test_split}
@@ -24,25 +26,17 @@ stages:
       - data
       - prepare
     deps:
-      - projects/waste_detection/pipeline.py
-      - trainer_core/cli.py
-      - trainer_core/config/schema.py
-      - trainer_core/config/loader.py
-      - trainer_core/config/overrides.py
-      - trainer_core/pipeline/prepare_stage.py
-      - trainer_core/pipeline/train_stage.py
-      - trainer_core/dataprep/transforms.py
-      - trainer_core/dataprep/outputs.py
-      - trainer_core/dataprep/find_duplicates.py
-      - trainer_core/dataprep/augmentation.py
-      - trainer_core/dataprep/types.py
+      - train.py
+      - trainer_core/
+      - pyproject.toml
+      - poetry.lock
       - raw_data/
     outs:
       - datasets/${data.dataset_name}
 
   train_model:
     cmd: >
-      python -m projects.waste_detection.pipeline --stage train
+      python -m train --stage train
       --dataset-name ${data.dataset_name}
       --model ${train.model}
       --val-split ${prepare.val_split}
@@ -53,16 +47,10 @@ stages:
       - models
       - evaluation.baseline_weights_path
     deps:
-      - projects/waste_detection/pipeline.py
-      - trainer_core/cli.py
-      - trainer_core/types.py
-      - trainer_core/pipeline/train_stage.py
-      - trainer_core/backends/shared.py
-      - trainer_core/backends/yolo.py
-      - trainer_core/backends/rfdetr.py
-      - trainer_core/backends/mmdet.py
-      - trainer_core/wrappers/rfdetr.py
-      - trainer_core/wrappers/rtmdet.py
+      - train.py
+      - trainer_core/
+      - pyproject.toml
+      - poetry.lock
       - .tmp/dvc_bootstrap.txt
       - datasets/${data.dataset_name}
       # Optional but path-stable dependency: placeholder created by setup_project.py.
@@ -72,7 +60,7 @@ stages:
 
   evaluate_model:
     cmd: >
-      python -m projects.waste_detection.pipeline --stage evaluate
+      python -m train --stage evaluate
       --dataset-name ${data.dataset_name}
       --model ${train.model}
       --val-split ${prepare.val_split}
@@ -84,16 +72,10 @@ stages:
       - data.class_mapping
       - prepare.auto_replay
     deps:
-      - projects/waste_detection/pipeline.py
-      - trainer_core/cli.py
-      - trainer_core/types.py
-      - trainer_core/pipeline/evaluate_stage.py
-      - trainer_core/pipeline/train_stage.py
-      - trainer_core/evaluation/validate.py
-      - trainer_core/evaluation/reports.py
-      - trainer_core/evaluation/extras.py
-      - trainer_core/plugins/replay.py
-      - trainer_core/dataprep/outputs.py
+      - train.py
+      - trainer_core/
+      - pyproject.toml
+      - poetry.lock
       - .tmp/dvc_bootstrap.txt
       - runs/.last_train_result.json
       - runs

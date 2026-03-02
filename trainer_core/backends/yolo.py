@@ -9,7 +9,12 @@ import matplotlib
 matplotlib.use("Agg")
 
 import torch
-from ultralytics import YOLO
+
+
+def YOLO(*args, **kwargs):
+    from ultralytics import YOLO as UltralyticsYOLO
+
+    return UltralyticsYOLO(*args, **kwargs)
 
 
 def _resolve_save_dir(model, results, default: Path) -> Path:
@@ -88,15 +93,7 @@ def train_model(
     else:
         checkpoint_name = str(checkpoint)
         print(f"Using YOLO checkpoint: {checkpoint_name}")
-        try:
-            model = YOLO(checkpoint_name)
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to initialize training. "
-                f"Tried to load official checkpoint '{checkpoint_name}' but it could not be "
-                "downloaded or loaded. Ensure network access or provide a valid local checkpoint "
-                "in models.<selected>.checkpoint."
-            ) from e
+        model = YOLO(checkpoint_name)
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")

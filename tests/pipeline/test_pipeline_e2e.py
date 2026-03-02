@@ -17,12 +17,16 @@ from pathlib import Path
 
 import pytest
 
+from trainer_core.pipeline.evaluate_stage import run_evaluate_stage
+from trainer_core.pipeline.prepare_stage import run_prepare_stage
+from trainer_core.pipeline.train_stage import run_train_stage
 from tests.pipeline_test_utils import build_args, create_minimal_dataset, write_params_yaml
 from tests.ultralytics_stub import StubYOLO
-from projects.waste_detection.pipeline import run_prepare_stage, run_train_eval_stage
 
-
-
+def run_train_eval_stage(args):
+    train_result = run_train_stage(args)
+    run_evaluate_stage(args, train_result=train_result)
+    return train_result
 
 @pytest.fixture
 def stubbed_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -35,17 +39,17 @@ def stubbed_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     # Replace YOLO constructors with the stub
     # Swap in the stub everywhere the pipeline imports YOLO so training/eval stays local.
-    monkeypatch.setattr("trainer_core.pipeline.train_stage.YOLO", StubYOLO)
+    monkeypatch.setattr("trainer_core.pipeline.model_state._load_yolo_model", StubYOLO)
     monkeypatch.setattr("trainer_core.backends.yolo.YOLO", StubYOLO)
 
     # Silence heavy post-processing during tests
     # Skip expensive visualisations/scene scanning; return deterministic metrics instead.
     monkeypatch.setattr(
-        "trainer_core.evaluation.extras.generate_side_by_side_comparisons",
+        "trainer_core.evaluation.visual_comparison.generate_side_by_side_comparisons",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
-        "trainer_core.evaluation.extras.calculate_scene_metrics",
+        "trainer_core.evaluation.scene_metrics.calculate_scene_metrics",
         lambda *args, **kwargs: {"scene_sourceT_fitness": 0.75},
     )
 
@@ -133,7 +137,7 @@ def test_prepare_stage_fails_when_no_training_data(stubbed_pipeline: StubYOLO):
 
 
 def test_pipeline_offline_error_when_no_weights(stubbed_pipeline: StubYOLO):
-    """If official checkpoints cannot be loaded, raise the explicit fallback error."""
+    """If official checkpoints cannot be loaded, training should fail fast."""
 
     workspace = Path.cwd()
     dataset_name = "e2e_dataset"
@@ -146,7 +150,7 @@ def test_pipeline_offline_error_when_no_weights(stubbed_pipeline: StubYOLO):
 
     StubYOLO.raise_on_official = True
 
-    with pytest.raises(RuntimeError, match="Failed to initialize training"):
+    with pytest.raises(RuntimeError):
         run_train_eval_stage(args)
 
 

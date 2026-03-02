@@ -25,9 +25,9 @@ def test_dvc_stage_contracts_are_split_for_prepare_train_evaluate() -> None:
     train_cmd = str(stages["train_model"].get("cmd", ""))
     evaluate_cmd = str(stages["evaluate_model"].get("cmd", ""))
 
-    assert "projects.waste_detection.pipeline" in prepare_cmd
-    assert "projects.waste_detection.pipeline" in train_cmd
-    assert "projects.waste_detection.pipeline" in evaluate_cmd
+    assert "python -m train" in prepare_cmd
+    assert "python -m train" in train_cmd
+    assert "python -m train" in evaluate_cmd
 
     assert "--stage prepare" in prepare_cmd
     assert "--stage train" in train_cmd

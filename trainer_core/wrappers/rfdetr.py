@@ -16,22 +16,30 @@ Usage::
 from __future__ import annotations
 
 import io
+import logging
 import sys
-import time
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict
 
 import cv2
 import numpy as np
-from trainer_core.wrappers.shared import (
+from trainer_core.wrappers.prediction_types import (
     CocoEvalResults as _CocoEvalResults,
     PredictionResult as _PredictionResult,
     ValMetrics as _ValMetrics,
-    build_prediction_result,
-    load_dataset_yaml as _load_dataset_yaml,
-    load_image,
-    parse_class_names as _parse_class_names,
 )
+from trainer_core.wrappers.prediction_utils import (
+    build_prediction_result,
+    load_image,
+)
+from trainer_core.wrappers.yolo_eval import (
+    compute_coco_metrics as _compute_coco_metrics_base,
+    evaluate_yolo_dataset as _evaluate_yolo_dataset,
+    parse_class_names as _parse_class_names,  # retained for compatibility in tests
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -148,128 +156,51 @@ class RFDETRModelAdapter:
             except (TypeError, ValueError):
                 imgsz_int = None
             if imgsz_int is not None and imgsz_int != int(self._resolution):
-                # RF-DETR always resizes to its configured resolution; it cannot
-                # honor per-call imgsz the way Ultralytics does.
-                print(
-                    f"Warning: RF-DETR adapter ignores imgsz={imgsz_int}; "
-                    f"using resolution={self._resolution}."
+                logger.warning(
+                    "RF-DETR adapter ignores imgsz=%s; using resolution=%s.",
+                    imgsz_int,
+                    self._resolution,
                 )
-
-        ds_cfg = _load_dataset_yaml(data)
-        dataset_path = Path(ds_cfg["path"])
-        val_rel = ds_cfg.get("val", "val/images")
-        images_dir = dataset_path / val_rel
-        labels_dir = images_dir.parent / "labels"
-
-        class_names = _parse_class_names(ds_cfg)
 
         conf_threshold = kwargs.get("conf", 0.001)
         classes_filter: set[int] | None = None
         if kwargs.get("classes") is not None:
             classes_filter = set(int(c) for c in kwargs["classes"])
 
-        # Collect ground-truth and predictions in COCO format
-        gt_images: list[dict] = []
-        gt_annotations: list[dict] = []
-        dt_results: list[dict] = []
-
-        ann_id = 1
-        image_id = 0
-        total_inference_ms = 0.0
-
-        image_files = sorted(
-            p
-            for p in images_dir.iterdir()
-            if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
-        ) if images_dir.exists() else []
-
-        for img_path in image_files:
-            img = cv2.imread(str(img_path))
-            if img is None:
-                continue
-            image_id += 1
-            h, w = img.shape[:2]
-
-            gt_images.append(
-                {"id": image_id, "file_name": img_path.name, "width": w, "height": h}
-            )
-
-            # --- Ground truth from YOLO labels ---
-            label_path = labels_dir / f"{img_path.stem}.txt"
-            if label_path.exists():
-                with open(label_path) as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) < 5:
-                            continue
-                        cls_id = int(parts[0])
-                        if classes_filter and cls_id not in classes_filter:
-                            continue
-                        cx, cy, bw, bh = (
-                            float(parts[1]),
-                            float(parts[2]),
-                            float(parts[3]),
-                            float(parts[4]),
-                        )
-                        x = (cx - bw / 2) * w
-                        y = (cy - bh / 2) * h
-                        box_w = bw * w
-                        box_h = bh * h
-                        gt_annotations.append(
-                            {
-                                "id": ann_id,
-                                "image_id": image_id,
-                                "category_id": cls_id,
-                                "bbox": [x, y, box_w, box_h],
-                                "area": box_w * box_h,
-                                "iscrowd": 0,
-                            }
-                        )
-                        ann_id += 1
-
-            # --- Inference ---
-            t0 = time.time()
+        def _infer_fn(img: np.ndarray, threshold: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             img_rgb = (
                 cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 if img.ndim == 3 and img.shape[2] == 3
                 else img
             )
-            detections = self._model.predict(img_rgb, threshold=conf_threshold)
-            t1 = time.time()
-            total_inference_ms += (t1 - t0) * 1000
+            detections = self._model.predict(img_rgb, threshold=threshold)
+            if detections is None or len(detections) == 0:
+                return (
+                    np.empty((0, 4), dtype=np.float32),
+                    np.empty((0,), dtype=np.float32),
+                    np.empty((0,), dtype=np.int64),
+                )
+            return (
+                np.asarray(detections.xyxy, dtype=np.float32),
+                np.asarray(detections.confidence, dtype=np.float32),
+                np.asarray(detections.class_id, dtype=np.int64),
+            )
 
-            if detections is not None and len(detections) > 0:
-                for i in range(len(detections)):
-                    det_cls = int(detections.class_id[i])
-                    if classes_filter and det_cls not in classes_filter:
-                        continue
-                    x1, y1, x2, y2 = detections.xyxy[i]
-                    score = float(detections.confidence[i])
-                    dt_results.append(
-                        {
-                            "image_id": image_id,
-                            "category_id": det_cls,
-                            "bbox": [
-                                float(x1),
-                                float(y1),
-                                float(x2 - x1),
-                                float(y2 - y1),
-                            ],
-                            "score": score,
-                        }
-                    )
+        gt_images, gt_annotations, dt_results, class_names, avg_inference = _evaluate_yolo_dataset(
+            data=data,
+            conf_threshold=float(conf_threshold),
+            classes_filter=classes_filter,
+            infer_fn=_infer_fn,
+        )
 
         # --- Compute metrics via pycocotools ---
         categories = [{"id": i, "name": n} for i, n in class_names.items()]
-        coco_metrics = _compute_coco_metrics(
-            gt_images, gt_annotations, dt_results, categories
-        )
+        coco_metrics = _compute_coco_metrics(gt_images, gt_annotations, dt_results, categories)
         precision, recall, map50, map50_95, per_class = coco_metrics
         macro_f1 = getattr(coco_metrics, "macro_f1", None)
 
         # Ultralytics fitness formula: 0.1 * mAP50 + 0.9 * mAP50-95
         fitness = 0.1 * map50 + 0.9 * map50_95
-        avg_inference = total_inference_ms / max(image_id, 1)
 
         results_dict = {
             "metrics/precision(B)": precision,
@@ -294,18 +225,6 @@ class RFDETRModelAdapter:
             speed={"preprocess": 0.0, "inference": avg_inference, "postprocess": 0.0},
             per_class=per_class,
         )
-
-
-def _compute_coco_metrics(
-    images: list[dict],
-    annotations: list[dict],
-    detections: list[dict],
-    categories: list[dict],
-) -> _CocoEvalResults:
-    """Run COCO evaluation via pycocotools and return COCO + extended metrics."""
-    if len(images) == 0:
-        return _CocoEvalResults(0.0, 0.0, 0.0, 0.0, {}, macro_f1=0.0)
-    return _coco_eval_pycocotools(images, annotations, detections, categories)
 
 
 def _coco_eval_pycocotools(
@@ -376,3 +295,6 @@ def _coco_eval_pycocotools(
         }
 
     return _CocoEvalResults(precision, recall, map50, map50_95, per_class, macro_f1=macro_f1)
+
+
+_compute_coco_metrics = partial(_compute_coco_metrics_base, eval_fn=_coco_eval_pycocotools)

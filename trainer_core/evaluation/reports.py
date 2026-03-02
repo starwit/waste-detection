@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
 
 from tabulate import tabulate
@@ -39,7 +38,7 @@ def append_results_to_csv(train_output_dir, results, metadata, is_original=False
 
     csv_path = train_output_dir / "test_results.csv"
     write_header = not csv_path.exists()
-    with open(csv_path, "a", newline="") as f:
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=csv_data.keys())
         if write_header:
             writer.writeheader()
@@ -57,8 +56,9 @@ def append_results_to_csv(train_output_dir, results, metadata, is_original=False
 def _append_per_class_to_csv(csv_path, per_class, model_name):
     """Append per-class metrics rows to a CSV file."""
     per_class_columns = ["MODEL", "CLASS", "precision", "recall", "ap50", "ap", "f1_score"]
-    write_header = not os.path.exists(csv_path)
-    with open(csv_path, "a", newline="") as f:
+    path = Path(csv_path)
+    write_header = not path.exists()
+    with open(path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=per_class_columns)
         if write_header:
             writer.writeheader()
@@ -77,7 +77,7 @@ def _append_per_class_to_csv(csv_path, per_class, model_name):
 
 def _format_per_class_table(per_class_csv_path):
     """Format per-class CSV into a readable table grouped by model."""
-    with open(per_class_csv_path, "r") as f:
+    with open(per_class_csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     if not rows:
@@ -117,7 +117,7 @@ def _format_per_class_table(per_class_csv_path):
 
 def _format_merged_class_table(csv_path):
     """Format merged-class CSV into a readable table grouped by model."""
-    with open(csv_path, "r") as f:
+    with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
     if not rows:
@@ -154,8 +154,11 @@ def _format_merged_class_table(csv_path):
     return "\n".join(output_parts)
 
 
-def create_formatted_table(csv_path):
-    with open(csv_path, "r") as f:
+def create_formatted_table(csv_path, *, output_dir: Path | None = None):
+    csv_path = Path(csv_path)
+    target_dir = Path(output_dir) if output_dir is not None else csv_path.parent
+
+    with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         headers = next(reader)
         data = list(reader)
@@ -222,8 +225,8 @@ def create_formatted_table(csv_path):
 
     formatted_descriptions = "\n\n".join(descriptions)
 
-    txt_path = "./results_comparison/results.txt"
-    with open(txt_path, "w") as f:
+    txt_path = target_dir / "results.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
         f.write("Overall Metrics:\n")
         f.write("=" * 80)
         f.write("\n\n")
@@ -232,8 +235,8 @@ def create_formatted_table(csv_path):
         f.write("Metric Descriptions:\n")
         f.write(formatted_descriptions)
 
-        per_class_csv_path = "./results_comparison/per_class_results.csv"
-        if os.path.exists(per_class_csv_path):
+        per_class_csv_path = target_dir / "per_class_results.csv"
+        if per_class_csv_path.exists():
             f.write("\n\n")
             f.write("=" * 80)
             f.write("\nPer-Class Metrics:\n")
@@ -249,8 +252,8 @@ def create_formatted_table(csv_path):
             f.write("  ap:        Average Precision across IoU 0.5-0.95 for this class.\n")
             f.write("  f1_score:  Harmonic mean of precision and recall for this class (at best-F1 confidence).\n")
 
-        merged_csv_path = "./results_comparison/merged_class_results.csv"
-        if os.path.exists(merged_csv_path):
+        merged_csv_path = target_dir / "merged_class_results.csv"
+        if merged_csv_path.exists():
             f.write("\n\n")
             f.write("=" * 80)
             f.write("\nMerged-Class Subset Metrics:\n")
@@ -277,7 +280,7 @@ def write_merged_class_results(output_dir, all_model_results):
     columns = ["MODEL", "source_class", "target_class", "n_objects", "precision", "recall", "ap50", "ap", "f1_score"]
 
     write_header = not csv_path.exists()
-    with open(csv_path, "a", newline="") as f:
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         if write_header:
             writer.writeheader()
@@ -339,7 +342,15 @@ def _build_mean_table_rows(basic_columns, scene_columns, path_results1, path_res
     return [retrained_row]
 
 
-def mean_table(path_results1, path_results2, experiment_name, base_run, base_model_name=None):
+def mean_table(
+    path_results1,
+    path_results2,
+    experiment_name,
+    base_run,
+    base_model_name=None,
+    *,
+    output_dir: Path | None = None,
+):
     basic_columns = [
         "MODEL",
         "img_size",
@@ -359,13 +370,14 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
     )
     formatted_data = _format_values(data)
 
-    os.makedirs("./results_comparison", exist_ok=True)
-    csv_path = "./results_comparison/results.csv"
+    target_dir = Path(output_dir) if output_dir is not None else Path("results_comparison")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = target_dir / "results.csv"
 
     existing_columns: list[str] = []
     existing_rows: list[dict[str, str]] = []
-    if os.path.exists(csv_path):
-        with open(csv_path, newline="") as f:
+    if csv_path.exists():
+        with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             try:
                 existing_columns = next(reader)
@@ -393,13 +405,13 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
                 row_dict[col] = row[idx]
         existing_rows.append(row_dict)
 
-    with open(csv_path, "w", newline="") as f:
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(merged_columns)
         for row_dict in existing_rows:
             writer.writerow([row_dict.get(col, "") for col in merged_columns])
 
-    per_class_csv_path = "./results_comparison/per_class_results.csv"
+    per_class_csv_path = target_dir / "per_class_results.csv"
     if base_run and path_results1 is not None:
         base_display = base_model_name if base_model_name else "YOLOv8m (base run)"
         per_class_base = path_results1.get("per_class", {})
@@ -410,7 +422,7 @@ def mean_table(path_results1, path_results2, experiment_name, base_run, base_mod
     if per_class_retrained:
         _append_per_class_to_csv(per_class_csv_path, per_class_retrained, experiment_name)
 
-    create_formatted_table(csv_path)
+    create_formatted_table(csv_path, output_dir=target_dir)
 
 
 __all__ = [

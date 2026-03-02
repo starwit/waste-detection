@@ -1,53 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
 
 import cv2
 import torch
-import yaml
 
+from trainer_core.datasets.yolo_yaml import get_dataset_classes
+from trainer_core.utils.path_ops import resolve_unique_run_dir, safe_dataset_dirname
 
-def _resolve_unique_run_dir(root: Path, run_name: str) -> Path:
-    candidate = root / run_name
-    if not candidate.exists():
-        return candidate
-    suffix = 1
-    while (root / f"{run_name}_{suffix}").exists():
-        suffix += 1
-    return root / f"{run_name}_{suffix}"
-
-
-def _safe_dataset_dirname(dataset_name: str) -> str:
-    raw = str(dataset_name or "").strip()
-    raw = Path(raw).name
-    safe = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in raw)
-    safe = safe.strip("_-")
-    return safe or "dataset"
-
-
-def _parse_names_mapping(dataset_yaml: Path) -> dict[int, str]:
-    with open(dataset_yaml, "r", encoding="utf-8") as f:
-        ds_cfg = yaml.safe_load(f) or {}
-
-    names_raw = ds_cfg.get("names", [])
-    if isinstance(names_raw, list):
-        return {i: str(name) for i, name in enumerate(names_raw)}
-    if isinstance(names_raw, dict):
-        parsed: dict[int, str] = {}
-        for raw_id, raw_name in names_raw.items():
-            try:
-                cls_id = int(raw_id)
-            except (TypeError, ValueError) as e:
-                raise ValueError(
-                    f"Invalid class id in dataset.yaml names mapping: {raw_id!r}. "
-                    "Expected integer keys (e.g. 0, 1) or numeric strings (e.g. '0', '1')."
-                ) from e
-            parsed[cls_id] = str(raw_name)
-        return {cls_id: parsed[cls_id] for cls_id in sorted(parsed)}
-    return {}
+logger = logging.getLogger(__name__)
 
 
 def _iter_image_files(images_dir: Path) -> list[Path]:
@@ -100,6 +65,11 @@ def _yolo_split_to_coco(
                         bw = float(parts[3])
                         bh = float(parts[4])
                     except ValueError:
+                        logger.debug(
+                            "Skipping invalid YOLO label line in %s: %r",
+                            label_path,
+                            line.strip(),
+                        )
                         continue
                     if cls_id not in cat_ids:
                         continue
@@ -138,7 +108,7 @@ def _yolo_split_to_coco(
 
 def _prepare_mmdet_coco_layout(training_path: Path, dataset_name: str) -> tuple[Path, dict[int, str]]:
     base_dir = Path(".tmp") / "mmdet_datasets"
-    output_dir = base_dir / _safe_dataset_dirname(str(dataset_name))
+    output_dir = base_dir / safe_dataset_dirname(str(dataset_name))
     if not output_dir.resolve(strict=False).is_relative_to(base_dir.resolve(strict=False)):
         raise ValueError(f"Unsafe dataset_name for MMDetection export dir: {dataset_name!r}")
 
@@ -151,7 +121,7 @@ def _prepare_mmdet_coco_layout(training_path: Path, dataset_name: str) -> tuple[
     ann_dir = output_dir / "annotations"
     ann_dir.mkdir(parents=True, exist_ok=True)
 
-    class_names = _parse_names_mapping(training_path / "dataset.yaml")
+    class_names, _ = get_dataset_classes(training_path / "dataset.yaml")
     categories = [{"id": cls_id, "name": name} for cls_id, name in class_names.items()]
 
     train_coco = _yolo_split_to_coco(
@@ -194,11 +164,16 @@ def _download_mmdet_assets(config_name: str, cache_dir: Path) -> None:
         str(cache_dir),
     ]
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, timeout=60 * 30)
     except FileNotFoundError as e:
         raise RuntimeError(
             "OpenMIM is required for RTMDet auto-download. "
             "Install it (e.g. `pip install openmim`) or provide models.<key>.config_path/checkpoint."
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Timed out downloading MMDetection assets for config '{config_name}'. "
+            f"Command: {' '.join(cmd)}"
         ) from e
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
@@ -423,7 +398,6 @@ def train_mmdet_backend(
             "(not `mmcv-lite`)."
         ) from e
 
-    from trainer_core.evaluation.validate import get_dataset_classes
     from trainer_core.wrappers.rtmdet import RTMDetModelAdapter
 
     dataset_dir, class_names = _prepare_mmdet_coco_layout(training_path, str(dataset_name))
@@ -440,7 +414,7 @@ def train_mmdet_backend(
     run_name = experiment_name or f"{resolved_cfg['model_key']}-mmdet"
     runs_root = Path("runs") / "rtmdet"
     runs_root.mkdir(parents=True, exist_ok=True)
-    output_dir = _resolve_unique_run_dir(runs_root, run_name)
+    output_dir = resolve_unique_run_dir(runs_root, run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = Config.fromfile(str(cfg_path))

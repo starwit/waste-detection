@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from setup_project import ensure_optional_weight_placeholders
-from trainer_core.pipeline.check_optional_weight_deps import main as check_optional_weight_deps_main
+from trainer_core.pipeline.check_optional_weight_deps import (
+    ensure_optional_weight_placeholders,
+    main as check_optional_weight_deps_main,
+)
 
 
 def _write_params(

@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from mmengine.logging.history_buffer import HistoryBuffer
 
 from trainer_core.backends.mmdet import _prepare_mmdet_coco_layout, _save_mmdet_weights
 
@@ -61,7 +60,7 @@ def test_save_mmdet_weights_writes_weights_only_checkpoint(tmp_path: Path) -> No
     torch.save(
         {
             "state_dict": {"backbone.stem.weight": torch.zeros((1,), dtype=torch.float32)},
-            "history": HistoryBuffer(),
+            "history": {"dummy": True},
         },
         source_ckpt,
     )

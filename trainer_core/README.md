@@ -1,6 +1,6 @@
 # Trainer Core — Multi-backend Training Pipeline
 
-Trainer Core is a DVC-friendly training and evaluation pipeline for object detection. It prepares YOLO-style datasets, trains a selected backend, and produces comparable metrics/reports across model families.
+Trainer Core is a DVC-driven training and evaluation pipeline for object detection. It prepares YOLO-style datasets, trains a selected backend, and produces comparable metrics/reports across model families.
 
 ## Supported backends
 
@@ -47,6 +47,7 @@ python -m trainer_core.cli --stage evaluate --dataset-name <name> --model <model
 
 ### Common CLI options
 
+- `--workspace-root .`: root directory for pipeline I/O (`raw_data/`, `datasets/`, `runs/`, `results_comparison/`, `metrics.json`)
 - `--config params.yaml`: config path (defaults to `params.yaml`)
 - `--model <key>`: selects a key under `models.*` (overrides `train.model`)
 - `--set key=value`: override config keys (supports dot paths)
@@ -126,6 +127,7 @@ evaluation:
 ### RF-DETR (`backend: rfdetr`)
 
 - Uses the `rfdetr` Python package.
+- `rfdetr` is a standard project dependency (installed via Poetry with the rest of the repo).
 - The backend trains via RF-DETR’s Roboflow dataset loader; the pipeline creates a tiny bridge layout under `.tmp/` and cleans it up after training.
 - RF-DETR resolution has divisibility constraints; the pipeline will auto-adjust and print a warning if needed.
 
@@ -210,7 +212,7 @@ Behavior:
 CLI override (multiple allowed):
 
 ```bash
-python -m projects.waste_detection.pipeline \
+python -m trainer_core.cli \
   --stage prepare -d waste-detection \
   --folder-subset uavvaste 0.5 \
   --folder-subset cw32-08-07-train 2.0

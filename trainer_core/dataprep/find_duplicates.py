@@ -1,12 +1,15 @@
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
+import logging
 from typing import Dict, List, Tuple, Set, NamedTuple
 
 import cv2
 import imagehash
 from PIL import Image, UnidentifiedImageError
 from skimage.metrics import structural_similarity as ssim
+
+logger = logging.getLogger(__name__)
 
 
 class Match(NamedTuple):
@@ -131,8 +134,13 @@ class DuplicateDetector:
     def find_duplicates(self, image_paths: List[Path]) -> Dict[Path, List[Path]]:
         """Return `{cluster_root: [img1, img2, …]}` for all duplicate clusters."""
         # 1. Compute pHashes in parallel (releases GIL)
-        with ProcessPoolExecutor() as pool:
-            hash_results = list(pool.map(self.compute_perceptual_hash, image_paths))
+        try:
+            with ProcessPoolExecutor() as pool:
+                hash_results = list(pool.map(self.compute_perceptual_hash, image_paths))
+        except (OSError, PermissionError) as exc:
+            # Some restricted runtimes disallow process-based multiprocessing (semaphores).
+            logger.warning("Falling back to in-process hashing due to multiprocessing error: %s", exc)
+            hash_results = [self.compute_perceptual_hash(path) for path in image_paths]
 
         # Keep successful hashes and convert hex→int once
         int_hashes: List[Tuple[Path, int]] = [
@@ -173,9 +181,14 @@ class DuplicateDetector:
         folder1_images = collect_images(folder1)
         folder2_images = collect_images(folder2)
 
-        with ProcessPoolExecutor() as pool:
-            folder1_hashes = list(pool.map(self.compute_perceptual_hash, folder1_images))
-            folder2_hashes = list(pool.map(self.compute_perceptual_hash, folder2_images))
+        try:
+            with ProcessPoolExecutor() as pool:
+                folder1_hashes = list(pool.map(self.compute_perceptual_hash, folder1_images))
+                folder2_hashes = list(pool.map(self.compute_perceptual_hash, folder2_images))
+        except (OSError, PermissionError) as exc:
+            logger.warning("Falling back to in-process hashing due to multiprocessing error: %s", exc)
+            folder1_hashes = [self.compute_perceptual_hash(path) for path in folder1_images]
+            folder2_hashes = [self.compute_perceptual_hash(path) for path in folder2_images]
 
         folder1_hashes = [(p, int(h, 16)) for p, h in folder1_hashes if h]
         folder2_hashes = [(p, int(h, 16)) for p, h in folder2_hashes if h]

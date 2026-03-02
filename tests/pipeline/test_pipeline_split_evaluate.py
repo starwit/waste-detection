@@ -21,7 +21,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from projects.waste_detection.pipeline import run_evaluate_stage, run_prepare_stage, run_train_stage
+from trainer_core.pipeline.evaluate_stage import run_evaluate_stage
+from trainer_core.pipeline.prepare_stage import run_prepare_stage
+from trainer_core.pipeline.train_stage import run_train_stage
 from tests.pipeline_test_utils import build_args, create_minimal_dataset, write_params_yaml
 from tests.ultralytics_stub import StubYOLO
 
@@ -107,7 +109,7 @@ def split_eval_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
     StubYOLO.recorded_models = []
     StubYOLO.raise_on_official = False
 
-    monkeypatch.setattr("trainer_core.pipeline.train_stage.YOLO", StubYOLO)
+    monkeypatch.setattr("trainer_core.pipeline.model_state._load_yolo_model", StubYOLO)
     monkeypatch.setattr("trainer_core.backends.yolo.YOLO", StubYOLO)
     monkeypatch.setattr(
         "trainer_core.dataprep.find_duplicates.DuplicateDetector.find_duplicates",
@@ -122,11 +124,11 @@ def split_eval_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
         lambda self, _training_path, _test_path: {},
     )
     monkeypatch.setattr(
-        "trainer_core.evaluation.extras.generate_side_by_side_comparisons",
+        "trainer_core.evaluation.visual_comparison.generate_side_by_side_comparisons",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
-        "trainer_core.evaluation.extras.calculate_scene_metrics",
+        "trainer_core.evaluation.scene_metrics.calculate_scene_metrics",
         lambda *args, **kwargs: {},
     )
     monkeypatch.setattr("trainer_core.plugins.replay.build_or_update_replay_set", lambda *a, **k: None)

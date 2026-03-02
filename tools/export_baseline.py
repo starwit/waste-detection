@@ -102,11 +102,11 @@ def export_baseline(args):
         metadata_to_write.setdefault("source_run", str(weights_source.parent))
     
     try:
-        weights_relative = weights_source.relative_to(workspace_root)
-        metadata_to_write["source_weights"] = str(weights_relative)
+        source_weights = str(weights_source.relative_to(workspace_root))
     except ValueError:
         # Fallback to absolute path if relative conversion fails
-        metadata_to_write["source_weights"] = str(weights_source)
+        source_weights = str(weights_source)
+    metadata_to_write["source_weights"] = source_weights
     
     if args.tag:
         metadata_to_write["tag"] = args.tag
@@ -114,15 +114,19 @@ def export_baseline(args):
     baseline_metadata_path = baseline_dir / "metadata.yaml"
 
     # Keep MMDetection baselines self-contained by copying the config file next to weights.
-    if str(metadata_to_write.get("model_backend", "")).strip().lower() == "mmdet":
+    model_backend = str(metadata_to_write.setdefault("model_backend", "")).strip().lower()
+    if model_backend == "mmdet":
+        baseline_config_path: Path | None = None
+
         config_candidate = _resolve_path(metadata_to_write.get("model_config_path"))
         if config_candidate and config_candidate.exists():
             baseline_config_path = baseline_dir / "model_config.py"
             shutil.copy2(config_candidate, baseline_config_path)
-            metadata_to_write["model_config_path"] = str(baseline_config_path)
         elif run_dir and (run_dir / "model_config.py").exists():
             baseline_config_path = baseline_dir / "model_config.py"
             shutil.copy2(run_dir / "model_config.py", baseline_config_path)
+
+        if baseline_config_path is not None:
             metadata_to_write["model_config_path"] = str(baseline_config_path)
 
     with open(baseline_metadata_path, "w") as f:

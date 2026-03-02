@@ -9,6 +9,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from trainer_core.cli import run_all_stages
+from trainer_core.pipeline.evaluate_stage import run_evaluate_stage
+from trainer_core.pipeline.prepare_stage import run_prepare_stage
+from trainer_core.pipeline.train_stage import run_train_stage
 from tests.pipeline_test_utils import create_minimal_dataset, write_params_yaml
 from tests.ultralytics_stub import StubYOLO
 
@@ -195,32 +199,33 @@ def _patch_lightweight_trainers(monkeypatch: pytest.MonkeyPatch, workspace: Path
     monkeypatch.setattr("trainer_core.backends.yolo.train_backend", _mk_runner("yolo"))
     monkeypatch.setattr("trainer_core.backends.rfdetr.train_backend", _mk_runner("rfdetr"))
     monkeypatch.setattr("trainer_core.backends.mmdet.train_backend", _mk_runner("mmdet"))
-    monkeypatch.setattr("trainer_core.pipeline.train_stage.YOLO", StubYOLO)
-    monkeypatch.setattr("trainer_core.evaluation.extras.generate_side_by_side_comparisons", lambda *a, **k: None)
-    monkeypatch.setattr("trainer_core.evaluation.extras.calculate_scene_metrics", lambda *a, **k: {})
+    monkeypatch.setattr("trainer_core.pipeline.model_state._load_yolo_model", StubYOLO)
+    monkeypatch.setattr(
+        "trainer_core.evaluation.visual_comparison.generate_side_by_side_comparisons",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr("trainer_core.evaluation.scene_metrics.calculate_scene_metrics", lambda *a, **k: {})
     monkeypatch.setattr("trainer_core.plugins.replay.build_or_update_replay_set", lambda *a, **k: None)
 
 
 def test_stage_contract_prepare_train_evaluate_all(
     contract_workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from projects.waste_detection import pipeline as wd_pipeline
-
     create_minimal_dataset(contract_workspace)
     _write_contract_params(contract_workspace, dataset_name="contract-stages", model="yolov8n")
     _patch_lightweight_trainers(monkeypatch, contract_workspace)
 
     args = _contract_args(dataset_name="contract-stages", model="yolov8n")
-    wd_pipeline.run_prepare_stage(args)
+    run_prepare_stage(args)
     assert (contract_workspace / "datasets" / "contract-stages").exists()
     assert not (contract_workspace / "results_comparison" / "results.csv").exists()
 
-    train_out = wd_pipeline.run_train_stage(args)
+    train_out = run_train_stage(args)
     assert train_out is not None
     assert list((contract_workspace / "runs").glob("**/weights/best.pt"))
     assert not (contract_workspace / "results_comparison" / "results.csv").exists()
 
-    wd_pipeline.run_evaluate_stage(args, train_result=train_out)
+    run_evaluate_stage(args, train_result=train_out)
     _assert_numeric_metric_contract(contract_workspace / "metrics.json")
     _assert_results_csv_contract(contract_workspace / "results_comparison" / "results.csv")
     assert (contract_workspace / "results_comparison" / "results.txt").exists()
@@ -229,7 +234,7 @@ def test_stage_contract_prepare_train_evaluate_all(
     create_minimal_dataset(contract_workspace)
     _write_contract_params(contract_workspace, dataset_name="contract-all", model="yolov8n")
     args_all = _contract_args(dataset_name="contract-all", model="yolov8n")
-    wd_pipeline.run_all_stages(args_all)
+    run_all_stages(args_all)
     _assert_numeric_metric_contract(contract_workspace / "metrics.json")
     _assert_results_csv_contract(contract_workspace / "results_comparison" / "results.csv")
 
@@ -248,14 +253,12 @@ def test_backend_metric_contracts(
     model_key: str,
     expected_backend: str,
 ) -> None:
-    from projects.waste_detection import pipeline as wd_pipeline
-
     create_minimal_dataset(contract_workspace)
     _write_contract_params(contract_workspace, dataset_name=f"contract-{model_key}", model=model_key)
     _patch_lightweight_trainers(monkeypatch, contract_workspace)
 
     args = _contract_args(dataset_name=f"contract-{model_key}", model=model_key)
-    wd_pipeline.run_all_stages(args)
+    run_all_stages(args)
 
     _assert_numeric_metric_contract(contract_workspace / "metrics.json")
     _assert_results_csv_contract(contract_workspace / "results_comparison" / "results.csv")

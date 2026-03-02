@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from trainer_core.config.loader import load_config
 from trainer_core.dataprep.find_duplicates import DuplicateDetector
-from trainer_core.dataprep.transforms import (
+from trainer_core.dataprep.dataset_builder import create_dataset_from_raw
+from trainer_core.dataprep.sampling import resolve_folder_subsets
+from trainer_core.dataprep.source_ingest import (
     check_for_test_images,
-    create_dataset_from_raw,
-    resolve_folder_subsets,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_prepare_stage(args, config=None) -> Path:
@@ -59,13 +62,13 @@ def run_prepare_stage(args, config=None) -> Path:
             test_data_exists=test_data_exists,
             recreate_dataset=recreate_dataset,
         )
-        print(f"Total training frames: {total_train_frames}")
-        print(f"Total validation frames: {total_val_frames}")
-        print(f"Total test frames: {total_test_frames}")
+        logger.info("Total training frames: %s", total_train_frames)
+        logger.info("Total validation frames: %s", total_val_frames)
+        logger.info("Total test frames: %s", total_test_frames)
     else:
-        print(f"Dataset '{dataset_name}' already exists. Skipping dataset creation.")
+        logger.info("Dataset '%s' already exists. Skipping dataset creation.", dataset_name)
 
-    print("Testing for duplicates between train and test folders...")
+    logger.info("Testing for duplicates between train and test folders...")
     detector = DuplicateDetector(phash_threshold=2, ssim_threshold=0.95)
     matches = detector.compare_folders(training_path, test_path)
     detector.print_folder_comparison_results(matches)

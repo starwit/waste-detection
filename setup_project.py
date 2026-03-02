@@ -12,9 +12,13 @@ DOES:
 
 import configparser
 import pathlib
-import sys
 import textwrap
+
 from ruamel.yaml import YAML
+
+from trainer_core.pipeline.check_optional_weight_deps import (
+    ensure_optional_weight_placeholders,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[0]
 CONFIG_FILE = ROOT / ".dvc" / "config"
@@ -40,11 +44,11 @@ def patch_dvc_config(project_slug: str) -> None:
     cfg.read(CONFIG_FILE)
 
     if REMOTE_SEC not in cfg:
-        sys.exit(f"Section {REMOTE_SEC!r} not found in {CONFIG_FILE}")
+        raise ValueError(f"Section {REMOTE_SEC!r} not found in {CONFIG_FILE}")
 
     cfg[REMOTE_SEC]["url"] = f"{BASE_URL}/{project_slug}"
 
-    with open(CONFIG_FILE, "w") as f:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         cfg.write(f)
 
 
@@ -52,7 +56,7 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
     yaml = YAML()
     yaml.preserve_quotes = True
 
-    with PARAMS_FILE.open("r") as f:
+    with PARAMS_FILE.open("r", encoding="utf-8") as f:
         params = yaml.load(f)
 
     # Ensure nested structure exists
@@ -84,7 +88,7 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
         data_cfg["use_coco_classes"] = True
         data_cfg["class_mapping"] = {}
 
-    with PARAMS_FILE.open("w") as f:
+    with PARAMS_FILE.open("w", encoding="utf-8") as f:
         yaml.dump(params, f)
 
 
@@ -94,39 +98,7 @@ def make_raw_data_dirs() -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def ensure_optional_weight_placeholders(root: pathlib.Path = ROOT) -> None:
-    params_file = root / "params.yaml"
-    if params_file.exists():
-        with params_file.open("r", encoding="utf-8") as f:
-            params = YAML(typ="safe").load(f) or {}
-    else:
-        return
-    if not isinstance(params, dict):
-        return
-
-    raw_paths = (
-        ((params.get("evaluation") or {}).get("baseline_weights_path")),
-        (((params.get("train") or {}).get("finetune") or {}).get("weights")),
-    )
-
-    seen: set[pathlib.Path] = set()
-    for raw_path in raw_paths:
-        text = str(raw_path or "").strip()
-        if not text:
-            continue
-        target = pathlib.Path(text).expanduser()
-        if not target.is_absolute():
-            target = root / target
-        if target in seen:
-            continue
-        seen.add(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            continue
-        target.touch()
-
-
-def main() -> None:
+def main() -> int:
     print("╭──────────────────────────────────────────────────────────────╮")
     print("│  YOLO-DVC template - initial configuration                   │")
     print("╰──────────────────────────────────────────────────────────────╯\n")
@@ -134,8 +106,12 @@ def main() -> None:
     project = prompt("Project name (e.g. waste-detection)")
     dataset = prompt("Dataset name (Enter = same as project)", default=project)
 
-    patch_dvc_config(project)
-    patch_params_yaml(dataset, project)
+    try:
+        patch_dvc_config(project)
+        patch_params_yaml(dataset, project)
+    except Exception as exc:
+        print(f"Setup failed: {exc}")
+        return 1
 
     print("\n.dvc/config remote URL set to:")
     print(f"   {BASE_URL}/{project}")
@@ -143,7 +119,7 @@ def main() -> None:
 
     make_raw_data_dirs()
     print("Created directories for raw data input")
-    ensure_optional_weight_placeholders()
+    ensure_optional_weight_placeholders(ROOT)
 
     print(textwrap.dedent(f"""
         ── NEXT STEPS ── (all manual – nothing was executed for you) ─────────
@@ -166,7 +142,8 @@ def main() -> None:
              git push
         ──────────────────────────────────────────────────────────────────────
     """))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

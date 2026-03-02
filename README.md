@@ -2,7 +2,9 @@
 
 This repository is the **waste-detection project/training repo**. It uses DVC (Data Version Control) to track datasets, experiments, and promoted baselines for reproducible model training.
 
-Training/evaluation is implemented by the Trainer Core pipeline (see `trainer_core/README.md`) and invoked via the project entrypoint in `projects/waste_detection/`.
+Training/evaluation is implemented by the Trainer Core pipeline (see `trainer_core/README.md`) and invoked via the project entrypoint `train.py`.
+DVC stages call `python -m train` plus `python -m trainer_core.pipeline.check_optional_weight_deps` for preflight checks.
+The project pipeline wrapper injects project-local defaults for `--workspace-root` and `--config` (`params.yaml`) so `trainer_core` can be consumed as a dependency without relying on shell cwd. If no `--stage` is provided, it defaults to `train`.
 
 ### Why DVC here?
 

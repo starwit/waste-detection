@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from setup_project import ensure_optional_weight_placeholders
+from trainer_core.pipeline.check_optional_weight_deps import ensure_optional_weight_placeholders
 from tests.pipeline_test_utils import create_minimal_dataset, write_params_yaml
 
 pytestmark = pytest.mark.heavy

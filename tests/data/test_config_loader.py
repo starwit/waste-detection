@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from trainer_core.backends.shared import resolve_training_config
+from trainer_core.backends.training_config import resolve_training_config
 from trainer_core.config.loader import load_config
 
 

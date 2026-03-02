@@ -3,6 +3,34 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 
+def ensure_optional_weight_placeholders(root: Path) -> None:
+    params_file = root / "params.yaml"
+    if not params_file.exists():
+        return
+
+    with params_file.open("r", encoding="utf-8") as handle:
+        params = YAML(typ="safe").load(handle) or {}
+    if not isinstance(params, dict):
+        return
+
+    finetune_cfg = (params.get("train") or {}).get("finetune") or {}
+    raw_paths = (
+        (params.get("evaluation") or {}).get("baseline_weights_path"),
+        finetune_cfg.get("weights"),
+    )
+
+    seen: set[Path] = set()
+    for raw_path in raw_paths:
+        path = _resolve_path(root, raw_path)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            continue
+        path.touch()
+
+
 def _resolve_path(repo_root: Path, raw: object) -> Path | None:
     text = str(raw or "").strip()
     if not text:
@@ -55,4 +83,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

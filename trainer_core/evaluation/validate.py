@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from trainer_core.evaluation import extras
+from trainer_core.datasets.yolo_yaml import get_dataset_classes as _get_dataset_classes
+from trainer_core.evaluation import scene_metrics
 from trainer_core.evaluation.reports import (
     append_results_to_csv,
     create_formatted_table,
     mean_table,
     write_merged_class_results,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -34,6 +36,7 @@ def evaluate_and_log_model_results(
     baseline_model=None,
     baseline_display_name=None,
     baseline_results=None,
+    metrics_json_path: Path | None = None,
 ):
     """
     Evaluate one model and append structured outputs.
@@ -50,6 +53,8 @@ def evaluate_and_log_model_results(
         class_ids=class_ids,
         imgsz=image_size,
         workers=0,
+        write_json=metrics_json_path is not None,
+        metrics_json_path=metrics_json_path,
     )
 
     metadata = {
@@ -97,7 +102,7 @@ def evaluate_and_log_model_results(
         if baseline_display_name
         else getattr(baseline_model, "model_name", "Baseline Model")
     )
-    print(f"Using provided baseline model for comparison: {base_model_name}")
+    logger.info("Using provided baseline model for comparison: %s", base_model_name)
 
     base_results = (
         baseline_results
@@ -111,51 +116,25 @@ def evaluate_and_log_model_results(
             write_json=False,
         )
     )
-    mean_table(base_results, results, model_name, True, base_model_name)
+    mean_table(
+        base_results,
+        results,
+        model_name,
+        True,
+        base_model_name,
+    )
 
     return metadata, results
 
 
 def get_dataset_classes(dataset_yaml_path):
     """Return (class_id_to_name, class_id_list) from dataset.yaml."""
-    with open(dataset_yaml_path, "r") as f:
-        dataset_config = yaml.safe_load(f) or {}
-
-    names_data = dataset_config.get("names", {})
-
-    if isinstance(names_data, list):
-        class_names = {i: str(name) for i, name in enumerate(names_data)}
-        class_ids = list(class_names.keys())
-    elif isinstance(names_data, dict):
-        parsed: dict[int, str] = {}
-        for raw_key, raw_name in names_data.items():
-            cls_id = int(raw_key)
-            parsed[cls_id] = str(raw_name)
-        class_ids = sorted(parsed.keys())
-        class_names = {k: parsed[k] for k in class_ids}
-    else:
-        class_names = {}
-        class_ids = []
-
-    return class_names, class_ids
+    return _get_dataset_classes(dataset_yaml_path)
 
 
 def _extract_per_class_metrics(metrics, data):
     """Extract per-class metrics from model validation results."""
-    with open(data) as f:
-        ds_config = yaml.safe_load(f) or {}
-
-    names = ds_config.get("names", {})
-    if isinstance(names, list):
-        names = {i: str(n) for i, n in enumerate(names)}
-    elif isinstance(names, dict):
-        parsed_names: dict[int, str] = {}
-        for raw_key, raw_name in names.items():
-            cls_id = int(raw_key)
-            parsed_names[cls_id] = str(raw_name)
-        names = parsed_names
-    else:
-        names = {}
+    names, _ = _get_dataset_classes(data)
 
     per_class = {}
 
@@ -189,7 +168,7 @@ def _extract_per_class_metrics(metrics, data):
     return {}
 
 
-def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
+def validate_model(model, data, class_ids=None, write_json=False, metrics_json_path=None, **kwargs):
     """Validate model and return normalized metrics payload."""
     validation_kwargs = kwargs.copy()
     if class_ids is not None:
@@ -244,11 +223,16 @@ def validate_model(model, data, class_ids=None, write_json=True, **kwargs):
     if per_class:
         metrics_dict["per_class"] = per_class
 
-    scene_metrics = extras.calculate_scene_metrics(model, data, **kwargs)
-    metrics_dict.update(scene_metrics)
+    try:
+        scene_metrics_dict = scene_metrics.calculate_scene_metrics(model, data, **kwargs)
+    except scene_metrics.SceneMetricsError as exc:
+        logger.warning("Skipping scene metrics for %s: %s", data, exc)
+    else:
+        metrics_dict.update(scene_metrics_dict)
 
     if write_json:
-        with open("metrics.json", "w") as f:
+        output_path = Path(metrics_json_path) if metrics_json_path is not None else Path("metrics.json")
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(metrics_dict, f, indent=4)
 
     return metrics_dict

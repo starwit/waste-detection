@@ -1,21 +1,16 @@
 from __future__ import annotations
 
+import errno
+import logging
 import shutil
 from pathlib import Path
 
 import torch
 import yaml
 
+from trainer_core.utils.path_ops import resolve_unique_run_dir, safe_dataset_dirname
 
-def _resolve_unique_run_dir(root: Path, run_name: str) -> Path:
-    """Return a unique directory path under root."""
-    candidate = root / run_name
-    if not candidate.exists():
-        return candidate
-    suffix = 1
-    while (root / f"{run_name}_{suffix}").exists():
-        suffix += 1
-    return root / f"{run_name}_{suffix}"
+logger = logging.getLogger(__name__)
 
 
 def _rfdetr_resolution_divisor(model_variant: str) -> int:
@@ -66,12 +61,7 @@ def _get_rfdetr_model(
     gradient_checkpointing: bool | None = None,
 ):
     """Return an initialized RF-DETR model based on a variant name."""
-    try:
-        import rfdetr
-    except (ImportError, ModuleNotFoundError, OSError) as e:
-        raise RuntimeError(
-            "RF-DETR is not installed. Add it to your environment (see pyproject.toml)."
-        ) from e
+    import rfdetr
 
     variant = (model_variant or "base").lower()
     class_name_by_variant = {
@@ -125,7 +115,7 @@ def train_rfdetr(
     layout bridge (data.yaml + train/valid/test image+label dirs).
     """
     run_name = experiment_name or "rfdetr-train"
-    output_dir = _resolve_unique_run_dir(output_root, run_name)
+    output_dir = resolve_unique_run_dir(output_root, run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -218,15 +208,6 @@ def _save_rfdetr_weights(output_dir: Path) -> None:
         print("Warning: No RF-DETR checkpoint found to copy to weights/best.pt")
 
 
-def _safe_dataset_dirname(dataset_name: str) -> str:
-    """Return a filesystem-safe single path component for a dataset name."""
-    raw = str(dataset_name or "").strip()
-    raw = Path(raw).name  # drop any path components (prevents traversal/absolute paths)
-    safe = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in raw)
-    safe = safe.strip("_-")
-    return safe or "dataset"
-
-
 def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_name: str) -> Path:
     """Create a lightweight YOLO-format directory for RF-DETR.
 
@@ -237,7 +218,7 @@ def _prepare_rfdetr_yolo_layout(training_path: Path, test_path: Path, dataset_na
     helper bridges the gap with three symlinks and one tiny YAML file.
     """
     base_dir = Path(".tmp") / "rfdetr_datasets"
-    output_dir = base_dir / _safe_dataset_dirname(str(dataset_name))
+    output_dir = base_dir / safe_dataset_dirname(str(dataset_name))
     # Defensive check: ensure output_dir cannot escape base_dir.
     if not output_dir.resolve(strict=False).is_relative_to(base_dir.resolve(strict=False)):
         raise ValueError(f"Unsafe dataset_name for RF-DETR export dir: {dataset_name!r}")
@@ -355,8 +336,12 @@ def train_rfdetr_backend(
     for parent in (rfdetr_export_dir.parent, tmp_root):
         try:
             parent.rmdir()  # only succeeds if empty
-        except (OSError, FileNotFoundError):
-            pass
+        except OSError as exc:
+            # Only suppress the expected "not empty" / "already gone" cases.
+            if exc.errno in {errno.ENOTEMPTY, errno.ENOENT}:
+                logger.debug("Skipping temp dir cleanup for %s: %s", parent, exc)
+                continue
+            raise
 
     return model, train_output_dir, display_name, int(rfdetr_resolution), int(rfdetr_epochs)
 
