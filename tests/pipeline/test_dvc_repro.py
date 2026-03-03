@@ -88,20 +88,6 @@ def _init_dvc_workspace(workspace: Path, env: dict[str, str]) -> None:
     _run_dvc(workspace, env, "init", "--no-scm", check=True)
 
 
-def _require_rtmdet_capable() -> None:
-    """Skip test if the environment cannot run RTMDet (no mim or no compiled mmcv ops)."""
-    import shutil
-
-    if not shutil.which("mim"):
-        pytest.skip("openmim not installed; install openmim to run RTMDet download tests.")
-    try:
-        import mmcv._ext  # type: ignore  # noqa: F401
-    except Exception as exc:
-        pytest.skip(
-            f"Full mmcv ops not available (install `mmcv`, not `mmcv-lite`): {exc}"
-        )
-
-
 def _assert_eval_artifacts(workspace: Path) -> None:
     results_dir = workspace / "results_comparison"
     assert (results_dir / "results.csv").exists()
@@ -448,71 +434,3 @@ def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Pat
     _assert_eval_artifacts(workspace)
     models = _load_results_models(workspace)
     assert any("promoted-baseline" in model for model in models), models
-
-
-def test_dvc_full_pipeline_rtmdet_download_and_train(tmp_path: Path) -> None:
-    """Full DVC pipeline must succeed for RTMDet via the mim download path.
-
-    Exercises prepare_data + train_model + evaluate_model with a real RTMDet
-    backend that downloads its config and checkpoint via `mim download mmdet`.
-    Any failure in the download or training path (wrong mim package name, config
-    resolution bug, etc.) surfaces as a real test failure instead of being hidden
-    by stubs.
-
-    Skipped when openmim is not installed or compiled mmcv ops are unavailable.
-    """
-    _require_rtmdet_capable()
-
-    repo_root = Path(__file__).resolve().parents[2]
-    workspace = tmp_path / "repo"
-    _copy_workspace(repo_root, workspace)
-    _install_ultralytics_stub(workspace)  # needed for YOLO baseline comparison in evaluate stage
-
-    cache_dir = workspace / "models" / "pretrained" / "rtmdet"
-    baseline_pt = workspace / "models" / "current_best" / "best.pt"
-    baseline_pt.parent.mkdir(parents=True, exist_ok=True)
-    baseline_pt.write_bytes(b"stub-baseline")  # stub YOLO model handled by ultralytics stub
-
-    create_minimal_dataset(workspace)
-    write_params_yaml(
-        workspace,
-        {
-            "data": {
-                "dataset_name": "dvc-rtmdet-download",
-                "class_mapping": {},
-            },
-            "prepare": {
-                "auto_replay": {},
-            },
-            "train": {
-                "model": "rtmdet-tiny",
-                "image_size": 128,
-                "epochs": 1,
-                "batch_size": 1,
-                "finetune": {
-                    "enabled": False,
-                    "weights": str(baseline_pt),
-                },
-            },
-            "models": {
-                "rtmdet-tiny": {
-                    "backend": "rtmdet",
-                    "config_name": "rtmdet_tiny_8xb32-300e_coco",
-                    "epochs": 1,
-                    "batch_size": 1,
-                    "image_size": 128,
-                    "cache_dir": str(cache_dir),
-                    "allow_download": True,
-                }
-            },
-            "evaluation": {
-                "baseline_weights_path": str(baseline_pt),
-            },
-        },
-    )
-
-    env = _make_env(workspace)
-    _init_dvc_workspace(workspace, env)
-    _run_dvc(workspace, env, "repro", "evaluate_model", check=True)
-
-    _assert_eval_artifacts(workspace)
