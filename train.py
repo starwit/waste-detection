@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from trainer_core.cli import main as core_main
+from object_detector_trainer.cli import main as core_main
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent

@@ -4,7 +4,7 @@ stages:
   # setup_project.py creates 0-byte placeholders for these paths on fresh clones so
   # DVC dependency checks stay deterministic and failures are explicit/actionable.
   check_optional_weight_deps:
-    cmd: python -m trainer_core.pipeline.check_optional_weight_deps
+    cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
     deps:
       - params.yaml
       - pyproject.toml

@@ -22,6 +22,8 @@ pytest = "^8.2.0"
 markers = [
     "heavy: opt-in integration tests (slower and/or environment-sensitive)",
 ]
+testpaths = ["tests"]
+norecursedirs = [".venv", "venv", "site-packages"]
 
 
 [build-system]
