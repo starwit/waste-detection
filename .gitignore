@@ -8,6 +8,9 @@ results_comparison/
 # python artifacts
 __pycache__
 
+# downloaded pretrained model assets (keep out of Git history)
+models/pretrained/
+
 # zip files
 *.zip
 

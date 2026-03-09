@@ -20,18 +20,13 @@ def test_dvc_stage_contracts_are_split_for_prepare_train_evaluate() -> None:
 
     for stage_name in ("prepare_data", "train_model", "evaluate_model"):
         assert stage_name in stages, f"Missing DVC stage: {stage_name}"
-    assert "check_optional_weight_deps" in stages, "Missing DVC stage: check_optional_weight_deps"
-
     prepare_cmd = str(stages["prepare_data"].get("cmd", ""))
     train_cmd = str(stages["train_model"].get("cmd", ""))
     evaluate_cmd = str(stages["evaluate_model"].get("cmd", ""))
-    preflight_cmd = str(stages["check_optional_weight_deps"].get("cmd", ""))
 
     assert "python -m train" in prepare_cmd
     assert "python -m train" in train_cmd
     assert "python -m train" in evaluate_cmd
-    assert preflight_cmd.strip().startswith("python -m ")
-    assert preflight_cmd.strip().endswith("check_optional_weight_deps")
 
     assert "--stage prepare" in prepare_cmd
     assert "--stage train" in train_cmd

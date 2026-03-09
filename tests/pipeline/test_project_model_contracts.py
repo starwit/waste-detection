@@ -24,7 +24,12 @@ import pytest
 from object_detector_trainer.backends.training_config import resolve_training_config
 from object_detector_trainer.cli import run_all_stages
 from object_detector_trainer.config.loader import load_config
-from tests.pipeline_test_utils import create_minimal_dataset, write_params_yaml
+from tests.pipeline_test_utils import (
+    create_baseline_artifact,
+    create_local_yolo_checkpoint,
+    create_minimal_dataset,
+    write_params_yaml,
+)
 from tests.ultralytics_stub import StubYOLO
 
 
@@ -40,6 +45,29 @@ _REQUIRED_METRIC_KEYS = (
     "ms_per_frame",
 )
 
+_BACKEND_REQUIRED_KEYS = {
+    "yolo": ["checkpoint"],
+    "rtmdet": ["rtmdet_config_name", "rtmdet_cache_dir"],
+    "rfdetr": ["rfdetr_variant", "rfdetr_resolution", "rfdetr_batch_size", "rfdetr_pretrain"],
+}
+
+
+def _discover_project_model_expectations() -> list[tuple[str, str, list[str]]]:
+    cfg = load_config(_PARAMS_YAML)
+    expectations: list[tuple[str, str, list[str]]] = []
+    for model_key in sorted(cfg.models):
+        model_cfg = cfg.models[model_key]
+        backend = str(model_cfg["backend"]).strip().lower()
+        expectations.append((str(model_key), backend, list(_BACKEND_REQUIRED_KEYS[backend])))
+    return expectations
+
+
+def _discover_project_backend_cases() -> list[tuple[str, str]]:
+    cases: dict[str, str] = {}
+    for model_key, backend, _required_keys in _discover_project_model_expectations():
+        cases.setdefault(backend, model_key)
+    return [(model_key, backend) for backend, model_key in sorted(cases.items())]
+
 
 # ---------------------------------------------------------------------------
 # Test group 1 — Config resolution
@@ -48,17 +76,7 @@ _REQUIRED_METRIC_KEYS = (
 
 @pytest.mark.parametrize(
     "model_key,expected_backend,required_keys",
-    [
-        ("yolov8m", "yolo", ["checkpoint"]),
-        ("yolo11m", "yolo", ["checkpoint"]),
-        ("rtmdet-tiny", "rtmdet", ["rtmdet_config_name", "rtmdet_cache_dir"]),
-        ("rtmdet-s", "rtmdet", ["rtmdet_config_name", "rtmdet_cache_dir"]),
-        ("rtmdet-m", "rtmdet", ["rtmdet_config_name", "rtmdet_cache_dir"]),
-        ("rtmdet-l", "rtmdet", ["rtmdet_config_name", "rtmdet_cache_dir"]),
-        ("rtmdet-x", "rtmdet", ["rtmdet_config_name", "rtmdet_cache_dir"]),
-        ("rfdetr-nano", "rfdetr", ["rfdetr_variant", "rfdetr_resolution", "rfdetr_batch_size"]),
-        ("rfdetr-medium", "rfdetr", ["rfdetr_variant", "rfdetr_resolution", "rfdetr_batch_size"]),
-    ],
+    _discover_project_model_expectations(),
 )
 def test_project_model_config_resolves(
     model_key: str, expected_backend: str, required_keys: list[str]
@@ -208,9 +226,9 @@ def _project_contract_args(*, dataset_name: str, model: str) -> SimpleNamespace:
 
 
 def _write_project_contract_params(workspace: Path, *, dataset_name: str, model: str) -> None:
-    baseline_path = workspace / "models" / "current_best" / "best.pt"
-    baseline_path.parent.mkdir(parents=True, exist_ok=True)
-    baseline_path.write_bytes(b"baseline-stub")
+    baseline_path = create_baseline_artifact(workspace)
+    cfg = load_config(_PARAMS_YAML)
+    model_cfg = dict(cfg.models[model])
 
     common: dict = {
         "data": {
@@ -221,45 +239,17 @@ def _write_project_contract_params(workspace: Path, *, dataset_name: str, model:
         },
         "train": {"model": model, "epochs": 1, "batch_size": 1, "image_size": 320},
         "evaluation": {"baseline_weights_path": str(baseline_path)},
+        "models": {model: model_cfg},
     }
 
-    if model == "yolov8m":
-        common["models"] = {"yolov8m": {"backend": "yolo", "checkpoint": "yolov8m.pt"}}
-    elif model == "rtmdet-tiny":
-        common["models"] = {
-            "rtmdet-tiny": {
-                "backend": "rtmdet",
-                "config_name": "rtmdet_tiny_8xb32-300e_coco",
-                "allow_download": False,
-                "epochs": 1,
-                "batch_size": 1,
-                "image_size": 320,
-            }
-        }
-    elif model == "rfdetr-nano":
-        common["models"] = {
-            "rfdetr-nano": {
-                "backend": "rfdetr",
-                "variant": "nano",
-                "resolution": 320,
-                "epochs": 1,
-                "batch_size": 1,
-                "grad_accum_steps": 1,
-            }
-        }
-    else:
-        raise AssertionError(f"Unsupported model for project contract test: {model}")
-
     write_params_yaml(workspace, common)
+    if str(model_cfg["backend"]).strip().lower() == "yolo":
+        create_local_yolo_checkpoint(workspace, checkpoint_path=str(model_cfg["checkpoint"]))
 
 
 @pytest.mark.parametrize(
     ("model_key", "expected_backend"),
-    [
-        ("yolov8m", "yolo"),
-        ("rtmdet-tiny", "rtmdet"),
-        ("rfdetr-nano", "rfdetr"),
-    ],
+    _discover_project_backend_cases(),
 )
 def test_project_pipeline_contract_per_backend(
     project_workspace: Path,

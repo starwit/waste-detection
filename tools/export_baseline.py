@@ -7,12 +7,8 @@ import yaml
 
 
 def _load_params() -> dict:
-    try:
-        with open("params.yaml", "r") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as exc:
-        print(f"Warning: could not read params.yaml ({exc})")
-        return {}
+    with open("params.yaml", "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def _resolve_path(path_str: str | None) -> Path | None:
@@ -25,13 +21,13 @@ def _resolve_path(path_str: str | None) -> Path | None:
 
 
 def _default_baseline_path(params: dict) -> Path:
-    baseline_rel = (
-        params.get("evaluation", {}).get("baseline_weights_path")
-        or "models/current_best/best.pt"
-    )
+    baseline_rel = params.get("evaluation", {}).get("baseline_weights_path")
     baseline_path = _resolve_path(baseline_rel)
     if baseline_path is None:
-        raise ValueError("Could not resolve baseline path from params.yaml")
+        raise ValueError(
+            "Could not resolve evaluation.baseline_weights_path from params.yaml. "
+            "Pass --baseline-path explicitly or configure params.yaml."
+        )
     return baseline_path
 
 
@@ -48,16 +44,33 @@ def _determine_sources(args) -> tuple[Path, Path | None, Path | None]:
 
     if weights_path is None:
         raise ValueError("A weights file must be provided via --weights or --run-dir")
+    if metadata_path is None:
+        raise ValueError(
+            "A metadata file must be provided via --metadata or implied via --run-dir."
+        )
 
     return weights_path, metadata_path, run_dir
+
+
+def _load_required_metadata(metadata_source: Path) -> dict:
+    if not metadata_source.exists():
+        raise FileNotFoundError(f"Metadata file not found: {metadata_source}")
+    with open(metadata_source, "r", encoding="utf-8") as f:
+        metadata = yaml.safe_load(f) or {}
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Metadata file must contain a YAML mapping: {metadata_source}")
+    model_backend = str(metadata.get("model_backend", "")).strip()
+    if not model_backend:
+        raise ValueError(
+            f"Metadata file must define model_backend for exported baselines: {metadata_source}"
+        )
+    return metadata
 
 
 def export_baseline(args):
     params = _load_params()
 
     baseline_weights_target = _resolve_path(args.baseline_path) or _default_baseline_path(params)
-    if baseline_weights_target.suffix != ".pt":
-        raise ValueError("Baseline path must point to a .pt file")
 
     weights_source, metadata_source, run_dir = _determine_sources(args)
 
@@ -70,22 +83,7 @@ def export_baseline(args):
     print(f"Copying weights -> {baseline_weights_target}")
     shutil.copy2(weights_source, baseline_weights_target)
 
-    # Prepare metadata (optional but recommended)
-    if args.skip_metadata:
-        print("Metadata copy skipped (per --skip-metadata)")
-        return
-
-    metadata_to_write: dict = {}
-    if metadata_source and metadata_source.exists():
-        try:
-            with open(metadata_source, "r") as f:
-                metadata_to_write = yaml.safe_load(f) or {}
-        except Exception as exc:
-            print(f"Warning: Could not read metadata from {metadata_source}: {exc}")
-            metadata_to_write = {}
-    else:
-        if metadata_source:
-            print(f"Warning: metadata source not found at {metadata_source}; creating minimal file")
+    metadata_to_write = _load_required_metadata(metadata_source)
 
     # Enrich metadata with export info
     # Convert absolute paths to relative paths starting with "runs/"
@@ -158,11 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--baseline-path",
         type=str,
         help="Destination path for the baseline weights (defaults to params.yaml evaluation.baseline_weights_path)",
-    )
-    parser.add_argument(
-        "--skip-metadata",
-        action="store_true",
-        help="Do not copy or generate metadata.yaml alongside the baseline weights",
     )
     parser.add_argument(
         "--tag",

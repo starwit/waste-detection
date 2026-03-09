@@ -9,8 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from object_detector_trainer.pipeline.check_optional_weight_deps import ensure_optional_weight_placeholders
-from tests.pipeline_test_utils import create_minimal_dataset, write_params_yaml
+from tests.pipeline_test_utils import (
+    create_baseline_artifact,
+    create_local_yolo_checkpoint,
+    create_minimal_dataset,
+    write_params_yaml,
+)
 
 pytestmark = pytest.mark.heavy
 
@@ -45,7 +49,6 @@ def _copy_workspace(src: Path, dst: Path) -> None:
         "metrics.json",
         "WAS_videos",
         "analysis_output",
-        "models",
         "*.pt",
         "*.pth",
         "*.onnx",
@@ -84,7 +87,6 @@ def _run_dvc(
 
 
 def _init_dvc_workspace(workspace: Path, env: dict[str, str]) -> None:
-    ensure_optional_weight_placeholders(workspace)
     _run_dvc(workspace, env, "init", "--no-scm", check=True)
 
 
@@ -142,6 +144,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
@@ -174,6 +177,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     _run_dvc(workspace, env, "repro", "train_model", check=True)
     second_mtime = marker.stat().st_mtime
@@ -219,6 +223,7 @@ def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) ->
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
@@ -258,6 +263,7 @@ def test_dvc_train_model_finetune_requires_existing_weights(tmp_path: Path) -> N
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
@@ -308,6 +314,7 @@ def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) ->
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
@@ -317,8 +324,8 @@ def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) ->
     assert run_marker.exists()
 
 
-def test_dvc_full_pipeline_fresh_project_without_baseline(tmp_path: Path) -> None:
-    """Fresh project contract: full DVC pipeline runs without promoted baseline files."""
+def test_dvc_evaluate_model_succeeds_without_local_baseline_file(tmp_path: Path) -> None:
+    """Fresh clone contract: missing promoted baseline must not block `evaluate_model`."""
     repo_root = Path(__file__).resolve().parents[2]
     workspace = tmp_path / "repo"
     _copy_workspace(repo_root, workspace)
@@ -362,14 +369,90 @@ def test_dvc_full_pipeline_fresh_project_without_baseline(tmp_path: Path) -> Non
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
     _run_dvc(workspace, env, "repro", "evaluate_model", check=True)
 
     _assert_eval_artifacts(workspace)
+
+    baseline_path = workspace / "models" / "current_best" / "best.pt"
+    assert baseline_path.exists()
+    assert baseline_path.stat().st_size == 0, "DVC preflight placeholder must stay empty until a baseline is promoted."
+
     models = _load_results_models(workspace)
-    assert any("yolov8n-coco" in model for model in models), models
+    assert models, models
+    assert len(models) == 1, models
+
+
+def test_dvc_evaluate_model_fails_when_promoted_baseline_weights_missing(tmp_path: Path) -> None:
+    """Existing project contract: promoted baseline metadata + missing weights must fail loudly."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = tmp_path / "repo"
+    _copy_workspace(repo_root, workspace)
+    _install_ultralytics_stub(workspace)
+
+    promoted_dir = workspace / "models" / "current_best"
+    promoted_dir.mkdir(parents=True, exist_ok=True)
+
+    # Mark baseline as promoted via metadata, but ensure weights are not present locally.
+    (promoted_dir / "metadata.yaml").write_text(
+        "experiment_name: promoted-baseline\nmodel_backend: yolo\nimage_size: 320\n",
+        encoding="utf-8",
+    )
+    weights_path = promoted_dir / "best.pt"
+    if weights_path.exists():
+        weights_path.unlink()
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {
+                "dataset_name": "dvc-promoted-missing-weights",
+                "class_mapping": {},
+            },
+            "prepare": {
+                "auto_replay": {},
+            },
+            "train": {
+                "model": "yolov8n",
+                "epochs": 1,
+                "batch_size": 1,
+                "finetune": {
+                    "enabled": False,
+                    "weights": "models/current_best/best.pt",
+                },
+            },
+            "models": {
+                "yolov8n": {
+                    "backend": "yolo",
+                    "checkpoint": "yolov8n.pt",
+                }
+            },
+            "evaluation": {
+                "baseline_weights_path": "models/current_best/best.pt",
+            },
+        },
+    )
+    create_local_yolo_checkpoint(workspace)
+
+    env = _make_env(workspace)
+    _init_dvc_workspace(workspace, env)
+    result = _run_dvc(
+        workspace,
+        env,
+        "repro",
+        "evaluate_model",
+        check=False,
+        capture=True,
+    )
+    assert result.returncode != 0
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    assert "Promoted baseline metadata exists" in combined
+    assert "models/current_best/best.pt" in combined
 
 
 def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Path) -> None:
@@ -379,20 +462,9 @@ def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Pat
     _copy_workspace(repo_root, workspace)
     _install_ultralytics_stub(workspace)
 
-    promoted_dir = workspace / "models" / "current_best"
-    promoted_dir.mkdir(parents=True, exist_ok=True)
-    baseline_weights = promoted_dir / "best.pt"
-    baseline_weights.write_bytes(b"promoted-baseline")
-    (promoted_dir / "metadata.yaml").write_text(
-        "\n".join(
-            [
-                "experiment_name: promoted-baseline",
-                "model_backend: yolo",
-                "image_size: 320",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+    baseline_weights = create_baseline_artifact(
+        workspace,
+        experiment_name="promoted-baseline",
     )
 
     create_minimal_dataset(workspace)
@@ -426,6 +498,7 @@ def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Pat
             },
         },
     )
+    create_local_yolo_checkpoint(workspace)
 
     env = _make_env(workspace)
     _init_dvc_workspace(workspace, env)
