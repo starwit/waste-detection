@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-"""Project-level integration tests that verify params.yaml and model configs are
-correctly integrated with the object_detector_trainer API.
+"""Project-level integration tests for the train wrapper + trainer-core API.
 
-Test group 1 — Config resolution (no mocking, non-heavy):
-    Loads the real params.yaml and resolves each of the 9 model keys, asserting the
-    correct backend and presence of backend-specific required keys.
-
-Test group 2 — Full pipeline contracts (monkeypatched backends, non-heavy):
-    Runs the full prepare→train→evaluate flow for one representative model per backend
-    using project-shaped params (including class_mapping). Verifies output contracts.
+These tests intentionally avoid relying on the repo's real params.yaml, because
+projects are expected to customize it freely. Instead, they build a small,
+project-shaped params.yaml in a temp workspace and run the full pipeline with
+monkeypatched backends.
 """
 
 import csv
@@ -21,19 +17,15 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from object_detector_trainer.backends.training_config import resolve_training_config
 from object_detector_trainer.cli import run_all_stages
-from object_detector_trainer.config.loader import load_config
 from tests.pipeline_test_utils import (
+    BASE_PARAMS,
     create_baseline_artifact,
     create_local_yolo_checkpoint,
     create_minimal_dataset,
     write_params_yaml,
 )
 from tests.ultralytics_stub import StubYOLO
-
-
-_PARAMS_YAML = Path(__file__).parents[2] / "params.yaml"
 
 _REQUIRED_METRIC_KEYS = (
     "precision",
@@ -45,72 +37,12 @@ _REQUIRED_METRIC_KEYS = (
     "ms_per_frame",
 )
 
-_BACKEND_REQUIRED_KEYS = {
-    "yolo": ["checkpoint"],
-    "rtmdet": ["rtmdet_config_name", "rtmdet_cache_dir"],
-    "rfdetr": ["rfdetr_variant", "rfdetr_resolution", "rfdetr_batch_size", "rfdetr_pretrain"],
-}
-
-
-def _discover_project_model_expectations() -> list[tuple[str, str, list[str]]]:
-    cfg = load_config(_PARAMS_YAML)
-    expectations: list[tuple[str, str, list[str]]] = []
-    for model_key in sorted(cfg.models):
-        model_cfg = cfg.models[model_key]
-        backend = str(model_cfg["backend"]).strip().lower()
-        expectations.append((str(model_key), backend, list(_BACKEND_REQUIRED_KEYS[backend])))
-    return expectations
-
-
-def _discover_project_backend_cases() -> list[tuple[str, str]]:
-    cases: dict[str, str] = {}
-    for model_key, backend, _required_keys in _discover_project_model_expectations():
-        cases.setdefault(backend, model_key)
-    return [(model_key, backend) for backend, model_key in sorted(cases.items())]
-
-
-# ---------------------------------------------------------------------------
-# Test group 1 — Config resolution
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "model_key,expected_backend,required_keys",
-    _discover_project_model_expectations(),
-)
-def test_project_model_config_resolves(
-    model_key: str, expected_backend: str, required_keys: list[str]
-) -> None:
-    """Every model key in params.yaml resolves to the correct backend with required fields."""
-    cfg = load_config(_PARAMS_YAML)
-    args = SimpleNamespace(model=model_key, seed=42, set=[])
-    resolved = resolve_training_config(args, cfg)
-
-    assert resolved["backend"] == expected_backend, (
-        f"Expected backend {expected_backend!r} for {model_key!r}, got {resolved['backend']!r}"
-    )
-    for key in required_keys:
-        assert resolved.get(key) is not None, (
-            f"Missing or None required key {key!r} for model {model_key!r}"
-        )
-
-
-def test_project_params_schema_validates() -> None:
-    """The real params.yaml loads without error and has the expected project structure."""
-    cfg = load_config(_PARAMS_YAML)
-
-    assert cfg.data.custom_classes, "custom_classes must be non-empty"
-    assert not cfg.data.use_coco_classes, "use_coco_classes must be False"
-    assert cfg.data.class_mapping, "class_mapping must be non-empty"
-    assert cfg.train.model in cfg.models, (
-        f"train.model={cfg.train.model!r} is not present in the models dict"
-    )
-    assert cfg.prepare.folder_subsets, "folder_subsets must be non-empty"
-
-
-# ---------------------------------------------------------------------------
-# Test group 2 — Full pipeline contracts (monkeypatched backends)
-# ---------------------------------------------------------------------------
+# Representative model per backend from BASE_PARAMS.
+_BACKEND_CASES: list[tuple[str, str]] = [
+    ("yolov8n", "yolo"),
+    ("rtmdet-tiny", "rtmdet"),
+    ("rfdetr-nano", "rfdetr"),
+]
 
 
 class _ProjectContractBox:
@@ -227,8 +159,7 @@ def _project_contract_args(*, dataset_name: str, model: str) -> SimpleNamespace:
 
 def _write_project_contract_params(workspace: Path, *, dataset_name: str, model: str) -> None:
     baseline_path = create_baseline_artifact(workspace)
-    cfg = load_config(_PARAMS_YAML)
-    model_cfg = dict(cfg.models[model])
+    model_cfg = dict(BASE_PARAMS["models"][model])
 
     common: dict = {
         "data": {
@@ -249,7 +180,7 @@ def _write_project_contract_params(workspace: Path, *, dataset_name: str, model:
 
 @pytest.mark.parametrize(
     ("model_key", "expected_backend"),
-    _discover_project_backend_cases(),
+    _BACKEND_CASES,
 )
 def test_project_pipeline_contract_per_backend(
     project_workspace: Path,
