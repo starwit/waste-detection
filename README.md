@@ -54,11 +54,11 @@ This repo publishes trained models with each GitHub Release and also tracks the 
 
 The training pipeline loads a baseline model for comparison during evaluation:
 
-- **First tries:** `evaluation.baseline_weights_path` from params.yaml (defaults to `models/current_best/best.pt`)
-- **Then tries:** Fine-tune weights if in finetune mode
-- **Falls back to:** Official YOLO COCO checkpoint (always works, even on fresh clones)
+- If `metadata.yaml` exists next to `evaluation.baseline_weights_path`, the baseline is treated as promoted and must be present locally.
+- If no baseline metadata exists yet, evaluation runs without baseline comparison.
+- There is no fallback to fine-tune weights or official checkpoints.
 
-On fresh clones, `setup_project.py` creates a 0-byte placeholder at `models/current_best/best.pt` so DVC can track the baseline path as a direct file dependency. The pipeline ignores empty placeholders automatically; run `dvc pull` or export a real baseline to replace it.
+On fresh clones, the DVC preflight step creates a 0-byte placeholder at `models/current_best/best.pt` so DVC can track the baseline path as a direct file dependency. The runtime treats empty placeholders as missing; run `dvc pull` or export a real baseline to replace it.
 
 To keep startup errors understandable on fresh clones, the DVC pipeline includes a small preflight step (`check_optional_weight_deps`) that verifies configured optional weight paths exist before `train_model` / `evaluate_model`. If only `best.pt.dvc` exists but the local `best.pt` is not present yet, this step fails early with a clear message and points users to run `python setup_project.py` (for placeholders) or `dvc pull` (for real weights).
 

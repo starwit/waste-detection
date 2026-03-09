@@ -73,12 +73,12 @@ def patch_params_yaml(dataset: str, experiment: str) -> None:
             # Keep class_mapping consistent with the selected class list.
             data_cfg["class_mapping"] = {cls: [cls] for cls in classes}
         else:
-            print("No valid classes entered. Falling back to COCO classes.")
+            print("No valid classes entered. Using COCO classes.")
             data_cfg["custom_classes"] = []
             data_cfg["use_coco_classes"] = True
             data_cfg["class_mapping"] = {}
     else:
-        # COCO fallback: remove custom_classes entirely
+        # Explicit COCO-class selection.
         data_cfg["custom_classes"] = []
         data_cfg["use_coco_classes"] = True
         data_cfg["class_mapping"] = {}

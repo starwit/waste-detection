@@ -1,7 +1,7 @@
 # dvc.yaml
 stages:
   # Preflight: verifies optional weight deps configured in params.yaml exist locally.
-  # setup_project.py creates 0-byte placeholders for these paths on fresh clones so
+  # The preflight step creates 0-byte placeholders for these paths on fresh clones so
   # DVC dependency checks stay deterministic and failures are explicit/actionable.
   check_optional_weight_deps:
     cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
@@ -50,7 +50,7 @@ stages:
       - poetry.lock
       - .tmp/dvc_bootstrap.txt
       - datasets/${data.dataset_name}
-      # Optional but path-stable dependency: placeholder created by setup_project.py.
+      # Optional but path-stable dependency: placeholder created by the preflight stage.
       - ${train.finetune.weights}
     outs:
       - runs
@@ -75,7 +75,7 @@ stages:
       - .tmp/dvc_bootstrap.txt
       - runs/.last_train_result.json
       - runs
-      # Optional but path-stable dependency: placeholder created by setup_project.py.
+      # Optional but path-stable dependency: placeholder created by the preflight stage.
       - ${evaluation.baseline_weights_path}
     outs:
       - results_comparison/
