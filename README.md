@@ -3,7 +3,7 @@
 This repository is the **waste-detection project/training repo**. It uses DVC (Data Version Control) to track datasets, experiments, and promoted baselines for reproducible model training.
 
 Training/evaluation is implemented by the external Trainer Core package (`object-detector-trainer`) and invoked via the project entrypoint `train.py`.
-DVC stages call `python -m train` plus `python -m object_detector_trainer.pipeline.check_optional_weight_deps` for preflight checks.
+DVC stages call `python -m object_detector_trainer.pipeline.check_optional_weight_deps` for direct-dependency preflight and `python -m train` for bootstrap/train/evaluate.
 The project pipeline wrapper injects project-local defaults for `--workspace-root` and `--config` (`params.yaml`) so `object_detector_trainer` can be consumed as a dependency without relying on shell cwd. If no `--stage` is provided, it defaults to `train`.
 
 Note on RTMDet dependencies:
@@ -58,9 +58,9 @@ The training pipeline loads a baseline model for comparison during evaluation:
 - If no baseline metadata exists yet, evaluation runs without baseline comparison.
 - There is no fallback to fine-tune weights or official checkpoints.
 
-On fresh clones, the DVC preflight step creates a 0-byte placeholder at `models/current_best/best.pt` so DVC can track the baseline path as a direct file dependency. The runtime treats empty placeholders as missing; run `dvc pull` or export a real baseline to replace it.
+On fresh clones, the DVC preflight step creates a 0-byte placeholder at `models/current_best/best.pt` only so DVC can track the baseline path as a direct file dependency. The runtime treats empty placeholders as missing; they are never used as a real model.
 
-To keep startup errors understandable on fresh clones, the DVC pipeline includes a small preflight step (`check_optional_weight_deps`) that verifies configured optional weight paths exist before `train_model` / `evaluate_model`. If only `best.pt.dvc` exists but the local `best.pt` is not present yet, this step fails early with a clear message and points users to run `python setup_project.py` (for placeholders) or `dvc pull` (for real weights).
+To keep the workflow explicit on fresh clones, the DVC pipeline first runs `check_optional_weight_deps` and then `bootstrap_model_assets`. Bootstrap provisions the selected backend's pretrained assets. Baseline weights remain an explicit `dvc pull` (evaluation will fail loudly if a promoted baseline is missing locally).
 
 When you want to make a freshly trained run the new comparison baseline:
 
@@ -109,10 +109,9 @@ The script will:
 * optionally ask for a comma-separated list of class names  
 * patch `.dvc/config` (remote URL) and `params.yaml` accordingly  
 * create the `raw_data/train` and `raw_data/test` folders
-* create 0-byte placeholder weight files for DVC's optional model dependencies
 
 **5. Commit the Initial Configuration**
-   The bootstrap script modifies configuration files. Commit these changes to save the project setup.
+   The setup script modifies configuration files. Commit these changes to save the project setup.
    ```bash
    git add .dvc/config params.yaml
    git commit -m "Initialize project configuration"
@@ -160,12 +159,20 @@ This project uses a structured workflow for training and promoting models. The k
 
 ### Step 1: Configure Parameters
 
-All training parameters live in **`params.yaml`**. For the complete configuration reference (including backend-specific keys), see:
+All training parameters live in **`params.yaml`**. For the complete configuration reference (including backend-specific hyperparameters), see:
 
 - https://github.com/starwit/object-detector-trainer
 
+This repo uses two layers of defaults to keep `params.yaml` readable:
+
+- `train.image_size` / `train.epochs` / `train.batch_size` are **shared defaults**. A specific model inherits them unless it sets `models.<key>.image_size` / `epochs` / `batch_size`.
+- `models_defaults.<backend>` defines **per-backend defaults** (applied to every `models.<key>` with that `backend`). Model-specific keys always win over `models_defaults`.
+- Pretrained assets are standardized across backends via `models.<key>.asset_id` (stored under `models_defaults.<backend>.cache_dir`).
+
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
+
+`dvc exp run` executes the full project pipeline: optional-weight preflight, bootstrap, data preparation, training, and evaluation. If you skip DVC and run stages manually, call `python -m train --stage bootstrap` before `train` or `all`.
 
 ```bash
 # Run an experiment with the settings from params.yaml

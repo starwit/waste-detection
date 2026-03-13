@@ -53,7 +53,7 @@ prepare:
     cw41-auto-mined: 1.0
     cw39-sam3-gated: 1.5
     cw39-maybe-false-positives: 1.5
-    # replay: 1.5
+    replay: 0
     # Add more folders as needed. Folders not listed here will use 100% of their images
 
 train:
@@ -78,69 +78,60 @@ train:
     lrf: 0.05
     patience: 20
 
-models:
-  yolov8m:
-    backend: yolo
-    checkpoint: yolov8m.pt
-
-  yolo11m:
-    backend: yolo
-    checkpoint: yolo11m.pt
-
-  rtmdet-tiny:
-    backend: rtmdet
-    config_name: rtmdet_tiny_8xb32-300e_coco
-    epochs: 100
-    batch_size: 4
-    image_size: 1280
+models_defaults:
+  # Per-backend defaults applied to all models of that backend.
+  # Precedence: models.<key> overrides models_defaults.<backend>.
+  yolo:
+    cache_dir: models/pretrained/yolo
+    allow_download: true
+  rtmdet:
     cache_dir: models/pretrained/rtmdet
     allow_download: true
-
-  rtmdet-s:
-    backend: rtmdet
-    config_name: rtmdet_s_8xb32-300e_coco
-    epochs: 100
-    batch_size: 4
-    image_size: 1280
-    cache_dir: models/pretrained/rtmdet
+  rfdetr:
+    cache_dir: models/pretrained/rfdetr
     allow_download: true
-
-  rtmdet-m:
-    backend: rtmdet
-    config_name: rtmdet_m_8xb32-300e_coco
-    epochs: 100
-    batch_size: 4
-    image_size: 1280
-    cache_dir: models/pretrained/rtmdet
-    allow_download: true
-
-  rtmdet-l:
-    backend: rtmdet
-    config_name: rtmdet_l_8xb32-300e_coco
-    epochs: 100
-    batch_size: 2
-    image_size: 1280
-    cache_dir: models/pretrained/rtmdet
-    allow_download: true
-
-  rtmdet-x:
-    backend: rtmdet
-    config_name: rtmdet_x_8xb32-300e_coco
-    epochs: 100
-    batch_size: 2
-    image_size: 1280
-    cache_dir: models/pretrained/rtmdet
-    allow_download: true
-
-  rfdetr-medium:
-    backend: rfdetr
-    variant: medium
-    resolution: 1280
-    epochs: 150
     batch_size: 2
     target_effective_batch: 16
     lr: 0.0001
     gradient_checkpointing: false
+
+models:
+  yolov8m:
+    backend: yolo
+    asset_id: yolov8m.pt
+
+  yolo11m:
+    backend: yolo
+    asset_id: yolo11m.pt
+
+  rtmdet-tiny:
+    backend: rtmdet
+    asset_id: rtmdet_tiny_8xb32-300e_coco
+
+  rtmdet-s:
+    backend: rtmdet
+    asset_id: rtmdet_s_8xb32-300e_coco
+
+  rtmdet-m:
+    backend: rtmdet
+    asset_id: rtmdet_m_8xb32-300e_coco
+
+  rtmdet-l:
+    backend: rtmdet
+    asset_id: rtmdet_l_8xb32-300e_coco
+    batch_size: 2
+
+  rtmdet-x:
+    backend: rtmdet
+    asset_id: rtmdet_x_8xb32-300e_coco
+    batch_size: 2
+
+  rfdetr-medium:
+    backend: rfdetr
+    variant: medium
+    asset_id: rf-detr-medium.pth
+    resolution: 1280
+    epochs: 150
     extra_train_kwargs:
       num_workers: 4
       multi_scale: true
@@ -151,21 +142,15 @@ models:
       early_stopping: true
       early_stopping_patience: 30
       early_stopping_min_delta: 0.001
-    # Optional:
-    # pretrain_weights: /path/to/checkpoint_best_total.pth
-
   rfdetr-nano:
     backend: rfdetr
     variant: nano
+    asset_id: rf-detr-nano.pth
     resolution: 1280
     epochs: 80
-    batch_size: 2
-    target_effective_batch: 16
-    lr: 0.0001
-    gradient_checkpointing: false
 
 evaluation:
   # Baseline model for evaluation comparisons (optional)
   # - If file exists and has content: compares your trained model against it
-  # - If missing/empty: pipeline falls back to selected model checkpoint
+  # - If missing/empty (and not promoted): evaluation runs on the trained model only
   baseline_weights_path: models/current_best/best.pt

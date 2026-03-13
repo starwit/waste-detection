@@ -22,6 +22,7 @@ BASE_PARAMS: Dict[str, Any] = {
         "val_split": 0.5,
         "test_split": 0.0,
         "augment_multiplier": 1,
+        "auto_replay": {"enabled": False},
         "folder_subsets": {},
     },
     "train": {
@@ -37,15 +38,20 @@ BASE_PARAMS: Dict[str, Any] = {
             "freeze_backbone": False,
         },
     },
+    "models_defaults": {
+        "yolo": {"cache_dir": "models/pretrained/yolo", "allow_download": True},
+        "rfdetr": {"cache_dir": "models/pretrained/rfdetr", "allow_download": True},
+        "rtmdet": {"cache_dir": "models/pretrained/rtmdet", "allow_download": True},
+    },
     "models": {
         "yolov8n": {
             "backend": "yolo",
-            "checkpoint": "yolov8n.pt",
+            "asset_id": "yolov8n.pt",
         },
         "rfdetr-nano": {
             "backend": "rfdetr",
             "variant": "nano",
-            "pretrain_weights": "models/pretrained/rfdetr/rf-detr-nano.pth",
+            "asset_id": "rf-detr-nano.pth",
             "resolution": 320,
             "epochs": 1,
             "batch_size": 1,
@@ -53,12 +59,10 @@ BASE_PARAMS: Dict[str, Any] = {
         },
         "rtmdet-tiny": {
             "backend": "rtmdet",
-            "config_name": "rtmdet_tiny_8xb32-300e_coco",
+            "asset_id": "rtmdet_tiny_8xb32-300e_coco",
             "epochs": 1,
             "batch_size": 1,
             "image_size": 320,
-            "allow_download": False,
-            "cache_dir": "models/pretrained/rtmdet",
         },
     },
     "evaluation": {
@@ -88,7 +92,7 @@ def _resolve_workspace_path(workspace: Path, raw_path: str | None) -> Path | Non
 def create_local_yolo_checkpoint(
     workspace: Path,
     *,
-    checkpoint_path: str = "yolov8n.pt",
+    checkpoint_path: str = "models/pretrained/yolo/yolov8n.pt",
     payload: bytes = b"stub-yolo-checkpoint",
 ) -> Path:
     resolved_path = _resolve_workspace_path(workspace, checkpoint_path)

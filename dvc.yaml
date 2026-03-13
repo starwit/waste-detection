@@ -1,8 +1,7 @@
 # dvc.yaml
 stages:
-  # Preflight: verifies optional weight deps configured in params.yaml exist locally.
-  # The preflight step creates 0-byte placeholders for these paths on fresh clones so
-  # DVC dependency checks stay deterministic and failures are explicit/actionable.
+  # Preflight: create placeholder files for optional direct DVC deps such as
+  # finetune/baseline paths so dependency checks stay deterministic on fresh clones.
   check_optional_weight_deps:
     cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
     deps:
@@ -11,6 +10,26 @@ stages:
       - poetry.lock
     outs:
       - .tmp/dvc_bootstrap.txt
+    always_changed: true
+
+  # Bootstrap: provision the selected model assets and write a manifest that
+  # downstream stages depend on. Baseline weights remain an explicit `dvc pull`
+  # (evaluation will fail loudly if a promoted baseline is missing locally).
+  bootstrap_model_assets:
+    cmd: >
+      python -m train --stage bootstrap
+      --model ${train.model}
+    params:
+      - train.model
+      - models
+      - evaluation.baseline_weights_path
+    deps:
+      - train.py
+      - pyproject.toml
+      - poetry.lock
+      - .tmp/dvc_bootstrap.txt
+    outs:
+      - .tmp/bootstrap_manifest.json
     always_changed: true
 
   prepare_data:
@@ -41,6 +60,7 @@ stages:
     params:
       - data
       - prepare.val_split
+      - prepare.auto_replay
       - train
       - models
       - evaluation.baseline_weights_path
@@ -49,8 +69,9 @@ stages:
       - pyproject.toml
       - poetry.lock
       - .tmp/dvc_bootstrap.txt
+      - .tmp/bootstrap_manifest.json
       - datasets/${data.dataset_name}
-      # Optional but path-stable dependency: placeholder created by the preflight stage.
+      # Optional direct dependency: placeholder created by the preflight stage.
       - ${train.finetune.weights}
     outs:
       - runs
@@ -67,15 +88,15 @@ stages:
       - train.model
       - evaluation.baseline_weights_path
       - data.class_mapping
-      - prepare.auto_replay
     deps:
       - train.py
       - pyproject.toml
       - poetry.lock
       - .tmp/dvc_bootstrap.txt
+      - .tmp/bootstrap_manifest.json
       - runs/.last_train_result.json
       - runs
-      # Optional but path-stable dependency: placeholder created by the preflight stage.
+      # Optional direct dependency: placeholder created by the preflight stage.
       - ${evaluation.baseline_weights_path}
     outs:
       - results_comparison/

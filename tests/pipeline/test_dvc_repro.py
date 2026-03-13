@@ -139,7 +139,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
         },
@@ -172,7 +172,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
         },
@@ -215,7 +215,7 @@ def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) ->
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
             "evaluation": {
@@ -258,7 +258,7 @@ def test_dvc_train_model_finetune_requires_existing_weights(tmp_path: Path) -> N
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
         },
@@ -309,7 +309,7 @@ def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) ->
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
         },
@@ -361,7 +361,7 @@ def test_dvc_evaluate_model_succeeds_without_local_baseline_file(tmp_path: Path)
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
             "evaluation": {
@@ -429,7 +429,7 @@ def test_dvc_evaluate_model_fails_when_promoted_baseline_weights_missing(tmp_pat
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
             "evaluation": {
@@ -490,7 +490,7 @@ def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Pat
             "models": {
                 "yolov8n": {
                     "backend": "yolo",
-                    "checkpoint": "yolov8n.pt",
+                    "asset_id": "yolov8n.pt",
                 }
             },
             "evaluation": {

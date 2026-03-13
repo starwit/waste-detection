@@ -7,6 +7,7 @@ DOES:
   • optionally set custom classes
   • patch .dvc/config   (remote URL)
   • patch params.yaml   (dataset_name, experiment_name, classes)
+  • create raw_data/train and raw_data/test directories
 """
 
 import configparser
@@ -128,8 +129,13 @@ def main() -> int:
            then:
 
              dvc add raw_data          
-             dvc exp run               # runs prepare + train stages
+             dvc exp run               # runs preflight + bootstrap + prepare + train + evaluate
              dvc exp show
+
+           If you run the pipeline manually without DVC, bootstrap first:
+
+             python -m train --stage bootstrap
+             python -m train --stage all
 
         4. Push whenever you decide:
              dvc push     # uploads data to Hetzner /{project}

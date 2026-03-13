@@ -262,7 +262,9 @@ def _write_project_contract_params(workspace: Path, *, dataset_name: str, model:
 
     write_params_yaml(workspace, common)
     if str(model_cfg["backend"]).strip().lower() == "yolo":
-        create_local_yolo_checkpoint(workspace, checkpoint_path=str(model_cfg["checkpoint"]))
+        cache_dir = Path(str(model_cfg.get("cache_dir", "models/pretrained/yolo")))
+        checkpoint_path = cache_dir / str(model_cfg["asset_id"])
+        create_local_yolo_checkpoint(workspace, checkpoint_path=str(checkpoint_path))
 
 
 @pytest.mark.parametrize(
