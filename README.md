@@ -17,7 +17,7 @@ Testing split:
   - heavy DVC integration tests: `poetry run pytest --heavy`
 - Trainer backend-heavy tests live in `object-detector-trainer`.
 - Ensure trainer deps are installed first (`poetry -C ../object-detector-trainer install`).
-- From this project root, run trainer heavy tests via: `poetry -C ../object-detector-trainer run pytest -m heavy`.
+- From this project root, run trainer heavy tests via: `poetry -C ../object-detector-trainer run python -m pytest object_detector_trainer/tests --heavy`.
 
 ### Why DVC here?
 
@@ -172,7 +172,7 @@ This repo uses two layers of defaults to keep `params.yaml` readable:
 ### Step 2: Run Experiments
 Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
 
-`dvc exp run` executes the full project pipeline: optional-weight preflight, bootstrap, data preparation, training, and evaluation. If you skip DVC and run stages manually, call `python -m train --stage bootstrap` before `train` or `all`.
+`dvc exp run` executes the full project pipeline: optional-weight preflight, bootstrap, data preparation, training, and evaluation. If you skip DVC and run stages manually, use `python -m train --stage all` for the full flow, or call `python -m train --stage bootstrap` before `train` when running stages individually.
 
 ```bash
 # Run an experiment with the settings from params.yaml
