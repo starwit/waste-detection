@@ -67,6 +67,49 @@ def _load_required_metadata(metadata_source: Path) -> dict:
     return metadata
 
 
+def _copy_rtmdet_baseline_config(
+    *,
+    metadata_to_write: dict,
+    metadata_source: Path | None,
+    run_dir: Path | None,
+    baseline_dir: Path,
+) -> None:
+    model_backend = str(metadata_to_write.get("model_backend", "")).strip().lower()
+    if model_backend not in {"rtmdet", "mmdet"}:
+        return
+
+    raw_config_path = str(metadata_to_write.get("model_config_path") or "").strip()
+    config_source: Path | None = None
+    if raw_config_path:
+        candidate = Path(raw_config_path).expanduser()
+        candidates: list[Path] = []
+        if candidate.is_absolute():
+            candidates.append(candidate)
+        else:
+            if metadata_source is not None:
+                candidates.append(metadata_source.parent / candidate)
+            candidates.append(Path.cwd() / candidate)
+        for resolved_candidate in candidates:
+            if resolved_candidate.exists():
+                config_source = resolved_candidate
+                break
+
+    if config_source is None:
+        run_config = run_dir / "model_config.py" if run_dir is not None else None
+        if run_config is not None and run_config.exists():
+            config_source = run_config
+        else:
+            raise FileNotFoundError(
+                "RTMDet baseline export requires a model_config.py artifact. "
+                "Pass --metadata pointing at a run metadata file that includes model_config_path, "
+                "or export directly from a run directory containing model_config.py."
+            )
+
+    baseline_config_path = baseline_dir / "model_config.py"
+    shutil.copy2(config_source, baseline_config_path)
+    metadata_to_write["model_config_path"] = baseline_config_path.name
+
+
 def export_baseline(args):
     params = _load_params()
 
@@ -111,23 +154,14 @@ def export_baseline(args):
 
     baseline_metadata_path = baseline_dir / "metadata.yaml"
 
-    # Keep MMDetection baselines self-contained by copying the config file next to weights.
-    model_backend = str(metadata_to_write.setdefault("model_backend", "")).strip().lower()
-    if model_backend in {"rtmdet", "mmdet"}:
-        baseline_config_path: Path | None = None
+    _copy_rtmdet_baseline_config(
+        metadata_to_write=metadata_to_write,
+        metadata_source=metadata_source,
+        run_dir=run_dir,
+        baseline_dir=baseline_dir,
+    )
 
-        config_candidate = _resolve_path(metadata_to_write.get("model_config_path"))
-        if config_candidate and config_candidate.exists():
-            baseline_config_path = baseline_dir / "model_config.py"
-            shutil.copy2(config_candidate, baseline_config_path)
-        elif run_dir and (run_dir / "model_config.py").exists():
-            baseline_config_path = baseline_dir / "model_config.py"
-            shutil.copy2(run_dir / "model_config.py", baseline_config_path)
-
-        if baseline_config_path is not None:
-            metadata_to_write["model_config_path"] = str(baseline_config_path)
-
-    with open(baseline_metadata_path, "w") as f:
+    with open(baseline_metadata_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(metadata_to_write, f, sort_keys=False)
 
     print(f"Metadata written -> {baseline_metadata_path}")

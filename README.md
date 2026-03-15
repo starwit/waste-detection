@@ -15,9 +15,9 @@ Testing split:
 - Project-level tests in this repo:
   - fast contract tests: `poetry run pytest`
   - heavy DVC integration tests: `poetry run pytest --heavy`
+- Standard project setup (`poetry install`) already installs `object-detector-trainer` from the Git dependency declared in `pyproject.toml`.
 - Trainer backend-heavy tests live in `object-detector-trainer`.
-- Ensure trainer deps are installed first (`poetry -C ../object-detector-trainer install`).
-- From this project root, run trainer heavy tests via: `poetry -C ../object-detector-trainer run python -m pytest object_detector_trainer/tests --heavy`.
+- The sibling `../object-detector-trainer` checkout is only needed when you are changing the trainer itself.
 
 ### Why DVC here?
 
@@ -49,11 +49,13 @@ This repo publishes trained models with each GitHub Release and also tracks the 
   - `weights/best.pt`: the promoted weights for inference
   - `test_metrics.json`: evaluation metrics of the promoted run
   - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
+  - `model_config.py`: copied RTMDet config when needed to keep promoted baselines self-contained
 
 ### Baseline comparisons
 
 The training pipeline loads a baseline model for comparison during evaluation:
 
+- `evaluation.baseline_weights_path` stays configured even on fresh clones. Before a baseline is promoted, that path may be missing or contain only the DVC placeholder file.
 - If `metadata.yaml` exists next to `evaluation.baseline_weights_path`, the baseline is treated as promoted and must be present locally.
 - If no baseline metadata exists yet, evaluation runs without baseline comparison.
 - There is no fallback to fine-tune weights or official checkpoints.
@@ -72,6 +74,8 @@ When you want to make a freshly trained run the new comparison baseline:
 2. Track the updated files with DVC so others can fetch them:
    ```bash
    dvc add models/current_best/best.pt models/current_best/metadata.yaml
+   # If export created model_config.py (RTMDet), track that too.
+   dvc add models/current_best/model_config.py
    dvc push
    ```
 
