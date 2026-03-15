@@ -8,7 +8,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--heavy",
         action="store_true",
         default=False,
-        help="Run heavy project integration tests (slow DVC/pipeline wiring checks).",
+        help=(
+            "Run heavy project integration tests "
+            "(slow DVC/pipeline wiring checks; backend training may be stubbed)."
+        ),
     )
 
 

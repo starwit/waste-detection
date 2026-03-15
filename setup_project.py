@@ -1,6 +1,9 @@
 """
 ────────────
-Interactive first-time setup for a repo created from the YOLO-DVC template.
+Interactive bootstrap helper for future derived training project work.
+
+This script is not part of the normal workflow for the live waste-detection
+project. It is kept only for intentionally bootstrapping a separate derived repo.
 
 DOES:
   • ask for project & dataset names
@@ -96,8 +99,9 @@ def make_raw_data_dirs() -> None:
 
 def main() -> int:
     print("╭──────────────────────────────────────────────────────────────╮")
-    print("│  YOLO-DVC template - initial configuration                   │")
+    print("│  Derived project bootstrap helper                            │")
     print("╰──────────────────────────────────────────────────────────────╯\n")
+    print("Use this only when intentionally bootstrapping a separate derived project repo.\n")
 
     project = prompt("Project name (e.g. waste-detection)")
     dataset = prompt("Dataset name (Enter = same as project)", default=project)

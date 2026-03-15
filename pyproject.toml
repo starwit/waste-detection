@@ -20,7 +20,7 @@ pytest = "^8.2.0"
 
 [tool.pytest.ini_options]
 markers = [
-    "heavy: opt-in integration tests (slower and/or environment-sensitive)",
+    "heavy: opt-in integration tests (slower and/or environment-sensitive; project heavy tests focus on DVC wiring and contracts)",
 ]
 testpaths = ["tests"]
 norecursedirs = [".venv", "venv", "site-packages"]

@@ -23,6 +23,9 @@ from tests.pipeline_test_utils import (
 
 pytestmark = pytest.mark.heavy
 
+# These tests exercise project-level DVC stage wiring and fresh-clone semantics.
+# Backend training is stubbed where appropriate so the contracts stay deterministic.
+
 
 def _install_ultralytics_stub(workspace: Path) -> None:
     """Provide a lightweight Ultralytics stub so DVC runs stay local inside tests."""

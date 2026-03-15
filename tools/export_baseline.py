@@ -165,6 +165,7 @@ def export_baseline(args):
         yaml.safe_dump(metadata_to_write, f, sort_keys=False)
 
     print(f"Metadata written -> {baseline_metadata_path}")
+    return baseline_weights_target, baseline_metadata_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -203,11 +204,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        export_baseline(args)
+        baseline_weights_target, baseline_metadata_path = export_baseline(args)
     except Exception as exc:
         print(f"Error: {exc}")
         return 1
-    print("Baseline export complete. Remember to run `dvc add` and `dvc push` if needed.")
+
+    baseline_dir = baseline_weights_target.parent
+    print("Baseline export complete.")
+    print("Next steps:")
+    print(f"  dvc add {baseline_weights_target}")
+    print("  dvc push")
+    print(f"  git add {baseline_weights_target.with_name(baseline_weights_target.name + '.dvc')}")
+    print(f"  git add {baseline_metadata_path}")
+    model_config_path = baseline_dir / "model_config.py"
+    if model_config_path.exists():
+        print(f"  git add {model_config_path}")
     return 0
 
 

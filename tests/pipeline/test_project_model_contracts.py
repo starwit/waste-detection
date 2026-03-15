@@ -9,7 +9,9 @@ Test group 1 — Config resolution (no mocking, non-heavy):
 
 Test group 2 — Full pipeline contracts (monkeypatched backends, non-heavy):
     Runs the full prepare→train→evaluate flow for one representative model per backend
-    using project-shaped params (including class_mapping). Verifies output contracts.
+    using project-shaped params (including class_mapping). Preprovisions local stub assets
+    for every backend so the contract stays offline and deterministic. Verifies output
+    contracts.
 """
 
 import csv
@@ -31,6 +33,8 @@ from object_detector_trainer.cli import run_all_stages
 from object_detector_trainer.config.loader import load_config
 from tests.pipeline_test_utils import (
     create_baseline_artifact,
+    create_local_rfdetr_checkpoint,
+    create_local_rtmdet_assets,
     create_local_yolo_checkpoint,
     create_minimal_dataset,
     write_params_yaml,
@@ -247,6 +251,24 @@ def _write_project_contract_params(workspace: Path, *, dataset_name: str, model:
     baseline_path = create_baseline_artifact(workspace)
     cfg = load_config(_PARAMS_YAML)
     model_cfg = dict(cfg.models[model])
+    backend = str(model_cfg["backend"]).strip().lower()
+    cache_dir = Path(f"models/pretrained/{backend}")
+
+    model_cfg["cache_dir"] = str(cache_dir)
+    model_cfg["allow_download"] = False
+
+    if backend == "yolo":
+        checkpoint_path = cache_dir / str(model_cfg["asset_id"])
+        create_local_yolo_checkpoint(workspace, checkpoint_path=str(checkpoint_path))
+    elif backend == "rfdetr":
+        checkpoint_path = cache_dir / str(model_cfg["asset_id"])
+        create_local_rfdetr_checkpoint(workspace, checkpoint_path=str(checkpoint_path))
+    elif backend == "rtmdet":
+        create_local_rtmdet_assets(
+            workspace,
+            asset_id=str(model_cfg["asset_id"]),
+            cache_dir=str(cache_dir),
+        )
 
     common: dict = {
         "data": {
@@ -261,10 +283,6 @@ def _write_project_contract_params(workspace: Path, *, dataset_name: str, model:
     }
 
     write_params_yaml(workspace, common)
-    if str(model_cfg["backend"]).strip().lower() == "yolo":
-        cache_dir = Path(str(model_cfg.get("cache_dir", "models/pretrained/yolo")))
-        checkpoint_path = cache_dir / str(model_cfg["asset_id"])
-        create_local_yolo_checkpoint(workspace, checkpoint_path=str(checkpoint_path))
 
 
 @pytest.mark.parametrize(
