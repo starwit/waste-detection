@@ -1,0 +1,385 @@
+schema: '2.0'
+stages:
+  check_optional_weight_deps:
+    cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
+    deps:
+    - path: params.yaml
+      hash: md5
+      md5: 8a85ac40b63d28c334e873cedf775d2a
+      size: 4504
+    - path: poetry.lock
+      hash: md5
+      md5: 5de2ecf0958724d01629b0ca234ff79c
+      size: 532644
+    - path: pyproject.toml
+      hash: md5
+      md5: 2f29ab64c9169310a78a4d42dc65777a
+      size: 784
+    outs:
+    - path: .tmp/dvc_bootstrap.txt
+      hash: md5
+      md5: eff5bc1ef8ec9d03e640fc4370f5eacd
+      size: 3
+  bootstrap_model_assets:
+    cmd: "python -m train --stage bootstrap --model yolo11m\n"
+    deps:
+    - path: .tmp/dvc_bootstrap.txt
+      hash: md5
+      md5: eff5bc1ef8ec9d03e640fc4370f5eacd
+      size: 3
+    - path: poetry.lock
+      hash: md5
+      md5: 5de2ecf0958724d01629b0ca234ff79c
+      size: 532644
+    - path: pyproject.toml
+      hash: md5
+      md5: 2f29ab64c9169310a78a4d42dc65777a
+      size: 784
+    - path: train.py
+      hash: md5
+      md5: 2d2c20e5465bfab754cf1bcbcbd0084c
+      size: 1078
+    params:
+      params.yaml:
+        evaluation.baseline_weights_path: models/current_best/best.pt
+        models:
+          yolov8m:
+            backend: yolo
+            asset_id: yolov8m.pt
+          yolo11m:
+            backend: yolo
+            asset_id: yolo11m.pt
+          rtmdet-tiny:
+            backend: rtmdet
+            asset_id: rtmdet_tiny_8xb32-300e_coco
+          rtmdet-s:
+            backend: rtmdet
+            asset_id: rtmdet_s_8xb32-300e_coco
+          rtmdet-m:
+            backend: rtmdet
+            asset_id: rtmdet_m_8xb32-300e_coco
+          rtmdet-l:
+            backend: rtmdet
+            asset_id: rtmdet_l_8xb32-300e_coco
+            batch_size: 2
+          rtmdet-x:
+            backend: rtmdet
+            asset_id: rtmdet_x_8xb32-300e_coco
+            batch_size: 2
+          rfdetr-medium:
+            backend: rfdetr
+            variant: medium
+            asset_id: rf-detr-medium.pth
+            resolution: 1280
+            epochs: 150
+            extra_train_kwargs:
+              num_workers: 4
+              multi_scale: true
+              expanded_scales: true
+              lr_drop: 120
+              checkpoint_interval: 10
+              warmup_epochs: 1.0
+              early_stopping: true
+              early_stopping_patience: 30
+              early_stopping_min_delta: 0.001
+          rfdetr-nano:
+            backend: rfdetr
+            variant: nano
+            asset_id: rf-detr-nano.pth
+            resolution: 1280
+            epochs: 80
+        train.model: yolo11m
+    outs:
+    - path: .tmp/bootstrap_manifest.json
+      hash: md5
+      md5: 7308430c9ecfd02908d42eb6ef3ef6b1
+      size: 931
+  prepare_data:
+    cmd: "python -m train --stage prepare --dataset-name waste-detection --val-split
+      0.1 --test-split 0.1 --augment-multiplier 1 --recreate-dataset\n"
+    deps:
+    - path: poetry.lock
+      hash: md5
+      md5: 5de2ecf0958724d01629b0ca234ff79c
+      size: 532644
+    - path: pyproject.toml
+      hash: md5
+      md5: 2f29ab64c9169310a78a4d42dc65777a
+      size: 784
+    - path: raw_data/
+      hash: md5
+      md5: d6607fa1556b9663336839a847497cc5.dir
+      size: 6843810503
+      nfiles: 24386
+    - path: train.py
+      hash: md5
+      md5: 2d2c20e5465bfab754cf1bcbcbd0084c
+      size: 1078
+    params:
+      params.yaml:
+        data:
+          dataset_name: waste-detection
+          experiment_name: waste-detection
+          custom_classes:
+          - waste
+          - cigarette
+          - leaf_pile
+          - leaf_region_dense
+          - leaf_region_sparse
+          - bottle
+          use_coco_classes: false
+          class_mapping:
+            waste:
+            - waste
+            - bottle
+            cigarette:
+            - cigarette
+            leaves_dense:
+            - leaf_pile
+            - leaf_region_dense
+            leaves_sparse:
+            - leaf_region_sparse
+        prepare:
+          val_split: 0.1
+          test_split: 0.1
+          augment_multiplier: 1
+          auto_replay:
+            enabled: false
+            max_new: 200
+            max_total: 400
+            iou_thr: 0.5
+            conf_thr: 0.25
+            border_conf: 0.35
+            include_empty: true
+            seed: 42
+            dest: raw_data/train/replay
+          folder_subsets:
+            uavvaste: 0.1
+            taco: 0.02
+            cw32-08-07-train: 1
+            cw33: 1
+            cw36-auto-mined: 1.0
+            cw41-auto-mined: 1.0
+            cw39-sam3-gated: 1.5
+            cw39-maybe-false-positives: 1.5
+            replay: 0
+    outs:
+    - path: datasets/waste-detection
+      hash: md5
+      md5: ca8f98fdb60ca7ae4003b3045ef37f86.dir
+      size: 4115756417
+      nfiles: 6636
+  train_model:
+    cmd: "python -m train --stage train --dataset-name waste-detection --model yolo11m
+      --val-split 0.1\n"
+    deps:
+    - path: .tmp/bootstrap_manifest.json
+      hash: md5
+      md5: 7308430c9ecfd02908d42eb6ef3ef6b1
+      size: 931
+    - path: .tmp/dvc_bootstrap.txt
+      hash: md5
+      md5: eff5bc1ef8ec9d03e640fc4370f5eacd
+      size: 3
+    - path: datasets/waste-detection
+      hash: md5
+      md5: ca8f98fdb60ca7ae4003b3045ef37f86.dir
+      size: 4115756417
+      nfiles: 6636
+    - path: models/current_best/best.pt
+      hash: md5
+      md5: 368f3606901cf3e1a126c8cc29b55ff4
+      size: 40681644
+    - path: poetry.lock
+      hash: md5
+      md5: 5de2ecf0958724d01629b0ca234ff79c
+      size: 532644
+    - path: pyproject.toml
+      hash: md5
+      md5: 2f29ab64c9169310a78a4d42dc65777a
+      size: 784
+    - path: train.py
+      hash: md5
+      md5: 2d2c20e5465bfab754cf1bcbcbd0084c
+      size: 1078
+    params:
+      params.yaml:
+        data:
+          dataset_name: waste-detection
+          experiment_name: waste-detection
+          custom_classes:
+          - waste
+          - cigarette
+          - leaf_pile
+          - leaf_region_dense
+          - leaf_region_sparse
+          - bottle
+          use_coco_classes: false
+          class_mapping:
+            waste:
+            - waste
+            - bottle
+            cigarette:
+            - cigarette
+            leaves_dense:
+            - leaf_pile
+            - leaf_region_dense
+            leaves_sparse:
+            - leaf_region_sparse
+        evaluation.baseline_weights_path: models/current_best/best.pt
+        models:
+          yolov8m:
+            backend: yolo
+            asset_id: yolov8m.pt
+          yolo11m:
+            backend: yolo
+            asset_id: yolo11m.pt
+          rtmdet-tiny:
+            backend: rtmdet
+            asset_id: rtmdet_tiny_8xb32-300e_coco
+          rtmdet-s:
+            backend: rtmdet
+            asset_id: rtmdet_s_8xb32-300e_coco
+          rtmdet-m:
+            backend: rtmdet
+            asset_id: rtmdet_m_8xb32-300e_coco
+          rtmdet-l:
+            backend: rtmdet
+            asset_id: rtmdet_l_8xb32-300e_coco
+            batch_size: 2
+          rtmdet-x:
+            backend: rtmdet
+            asset_id: rtmdet_x_8xb32-300e_coco
+            batch_size: 2
+          rfdetr-medium:
+            backend: rfdetr
+            variant: medium
+            asset_id: rf-detr-medium.pth
+            resolution: 1280
+            epochs: 150
+            extra_train_kwargs:
+              num_workers: 4
+              multi_scale: true
+              expanded_scales: true
+              lr_drop: 120
+              checkpoint_interval: 10
+              warmup_epochs: 1.0
+              early_stopping: true
+              early_stopping_patience: 30
+              early_stopping_min_delta: 0.001
+          rfdetr-nano:
+            backend: rfdetr
+            variant: nano
+            asset_id: rf-detr-nano.pth
+            resolution: 1280
+            epochs: 80
+        prepare.auto_replay:
+          enabled: false
+          max_new: 200
+          max_total: 400
+          iou_thr: 0.5
+          conf_thr: 0.25
+          border_conf: 0.35
+          include_empty: true
+          seed: 42
+          dest: raw_data/train/replay
+        prepare.val_split: 0.1
+        train:
+          model: yolo11m
+          image_size: 1280
+          epochs: 100
+          batch_size: 4
+          finetune:
+            enabled: false
+            weights: models/current_best/best.pt
+            lr: 0.0012
+            epochs: 30
+            freeze_backbone: true
+            optimizer: AdamW
+            mosaic: 0.15
+            close_mosaic: 5
+            mixup: 0.0
+            cos_lr: true
+            lrf: 0.05
+            patience: 20
+    outs:
+    - path: runs
+      hash: md5
+      md5: fcb9a8d54d12d1e02e962c2e07926fdd.dir
+      size: 573703519
+      nfiles: 194
+  evaluate_model:
+    cmd: "python -m train --stage evaluate --dataset-name waste-detection --model
+      yolo11m --val-split 0.1\n"
+    deps:
+    - path: .tmp/bootstrap_manifest.json
+      hash: md5
+      md5: 7308430c9ecfd02908d42eb6ef3ef6b1
+      size: 931
+    - path: .tmp/dvc_bootstrap.txt
+      hash: md5
+      md5: eff5bc1ef8ec9d03e640fc4370f5eacd
+      size: 3
+    - path: models/current_best/best.pt
+      hash: md5
+      md5: 368f3606901cf3e1a126c8cc29b55ff4
+      size: 40681644
+    - path: poetry.lock
+      hash: md5
+      md5: 5de2ecf0958724d01629b0ca234ff79c
+      size: 532644
+    - path: pyproject.toml
+      hash: md5
+      md5: 2f29ab64c9169310a78a4d42dc65777a
+      size: 784
+    - path: runs
+      hash: md5
+      md5: fcb9a8d54d12d1e02e962c2e07926fdd.dir
+      size: 573703519
+      nfiles: 194
+    - path: runs/.last_train_result.json
+      hash: md5
+      md5: 222e322405ec529fa9c316c293561f8e
+      size: 897
+    - path: train.py
+      hash: md5
+      md5: 2d2c20e5465bfab754cf1bcbcbd0084c
+      size: 1078
+    params:
+      params.yaml:
+        data:
+          dataset_name: waste-detection
+          experiment_name: waste-detection
+          custom_classes:
+          - waste
+          - cigarette
+          - leaf_pile
+          - leaf_region_dense
+          - leaf_region_sparse
+          - bottle
+          use_coco_classes: false
+          class_mapping: &id001
+            waste:
+            - waste
+            - bottle
+            cigarette:
+            - cigarette
+            leaves_dense:
+            - leaf_pile
+            - leaf_region_dense
+            leaves_sparse:
+            - leaf_region_sparse
+        data.class_mapping: *id001
+        evaluation.baseline_weights_path: models/current_best/best.pt
+        prepare.val_split: 0.1
+        train.model: yolo11m
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: 48daf3143d9ff5a738869d4ee4f47722
+      size: 457
+    - path: results_comparison/
+      hash: md5
+      md5: 56d4e38fda72788ce5b437004926dd05.dir
+      size: 2646
+      nfiles: 2

@@ -1,5 +1,5 @@
 outs:
-- md5: d39691c5610727ecbe85f29b36f26db0
-  size: 40681708
+- md5: 368f3606901cf3e1a126c8cc29b55ff4
+  size: 40681644
   hash: md5
   path: best.pt

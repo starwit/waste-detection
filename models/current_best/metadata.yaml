@@ -1,8 +1,15 @@
-experiment_name: v11m-rerun-1280-uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass
+experiment_name: v11m-1280--uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass
 image_size: 1280
 model_size: yolo11m.pt
 num_epochs: 100
 split_parameters:
   val_split: 0.1
-source_run: runs/v11m-rerun-1280-uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass
-source_weights: runs/v11m-rerun-1280-uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass/weights/best.pt
+model_backend: yolo
+model_variant: yolo11m
+class_names:
+  0: waste
+  1: cigarette
+  2: leaves_dense
+  3: leaves_sparse
+source_run: runs/v11m-1280--uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass
+source_weights: runs/v11m-1280--uav-taco-cw32-cw33-cw36-cw41-cw39sam-cw39pf--10-2-100-100-100-150-150-100ep-twoclass/weights/best.pt
