@@ -10,7 +10,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help=(
             "Run heavy project integration tests "
-            "(slow DVC/pipeline wiring checks; backend training may be stubbed)."
+            "(slow DVC/pipeline wiring checks; real backend bootstrap/training lives in the trainer repo)."
         ),
     )
 

@@ -22,7 +22,6 @@ stages:
     params:
       - train.model
       - models
-      - evaluation.baseline_weights_path
     deps:
       - train.py
       - pyproject.toml
@@ -63,7 +62,6 @@ stages:
       - prepare.auto_replay
       - train
       - models
-      - evaluation.baseline_weights_path
     deps:
       - train.py
       - pyproject.toml

@@ -1,6 +1,6 @@
 # Waste Detection
 
-This repository is the live `waste-detection` training project. It uses DVC to track datasets, experiments, and the promoted comparison baseline, while the reusable training backend lives in the external `object-detector-trainer` package.
+This repository contains the `waste-detection` training project. It uses DVC to track datasets, experiments, and the promoted comparison baseline, while the reusable training backend lives in the external `object-detector-trainer` package.
 
 Project entrypoints:
 
@@ -16,8 +16,7 @@ Supported backends in this project:
 RTMDet/OpenMMLab note:
 
 - This project installs `object-detector-trainer` with RTMDet extras enabled.
-- RTMDet currently works most reliably with Python 3.11.
-- If your default environment is Python 3.12 and `mmcv` install/runtime fails, create/select a Poetry 3.11 environment first: `poetry env use 3.11`.
+- If your local OpenMMLab runtime fails to install or import cleanly, use Python 3.11: `poetry env use 3.11`.
 
 ## Testing
 
@@ -29,7 +28,7 @@ Project-level tests in this repo:
   Fast contract tests for config resolution, wrapper behavior, and offline pipeline contracts.
 - `poetry run pytest --heavy`
   Heavy project integration tests for DVC stage wiring, fresh-clone behavior, rerun invalidation, baseline semantics, and project outputs.
-  These tests use lightweight backend stubs where appropriate so they stay deterministic and do not depend on downloading real model assets.
+  These tests run the project pipeline stages with lightweight backend stubs where appropriate so they stay deterministic and do not depend on downloading real model assets.
 
 Trainer-level tests in `object-detector-trainer`:
 
@@ -41,8 +40,6 @@ Trainer-level tests in `object-detector-trainer`:
 
 ## Clone And Setup
 
-This repo is already configured as the `waste-detection` project. Normal day-to-day work does not use `setup_project.py`.
-
 Typical fresh-clone setup:
 
 ```bash
@@ -51,11 +48,11 @@ poetry install
 
 ## Common States
 
-Use the path that matches your current repo state.
+Use the path that matches your repo state.
 
-### 1. Fresh clone of the live waste-detection project
+### 1. Fresh clone of the waste-detection project
 
-Use this when you want the repo exactly as currently promoted:
+Use this when you want the repo as promoted in Git and DVC:
 
 ```bash
 poetry install
@@ -75,7 +72,7 @@ Use this when you want to replace the tracked dataset with new local inputs:
 
 1. Add or replace files under `raw_data/train/` and optionally `raw_data/test/`.
 2. Run `dvc add raw_data` after the dataset is in place.
-3. Pull the current promoted baseline before running the full pipeline:
+3. Pull the promoted baseline before running the full pipeline:
 
 ```bash
 dvc pull models/current_best/best.pt
@@ -89,7 +86,7 @@ dvc exp run
 
 ### 3. Fresh clone, but you only want to train and not evaluate yet
 
-This is possible without pulling the promoted baseline, but only if fine-tuning is disabled:
+This is possible without pulling the promoted baseline as long as training is not trying to fine-tune from it:
 
 ```bash
 python -m train --stage bootstrap
@@ -97,22 +94,13 @@ python -m train --stage prepare
 python -m train --stage train
 ```
 
-This does not make the full project pipeline ready. `evaluate` and `dvc exp run` still require the promoted baseline weights in this live repo.
-
-### 4. Future derived repo with no promoted baseline yet
-
-This is not the current state of `waste-detection`, but it is the intended clean bootstrap state for future derived repos:
-
-- `evaluation.baseline_weights_path` still exists in config.
-- `check_optional_weight_deps` creates the empty placeholder file.
-- No `metadata.yaml` exists next to the baseline path yet.
-- Full training and evaluation work without pulling a baseline because there is no promoted baseline comparison yet.
+This does not make the full project pipeline ready. `evaluate` and `dvc exp run` require the promoted baseline weights in this repo.
 
 Why the baseline pull matters:
 
 - This repo already contains promoted baseline metadata at `models/current_best/metadata.yaml`.
 - Because that metadata exists, evaluation treats the baseline as promoted and requires the matching local weights file.
-- A fresh clone without `models/current_best/best.pt` can still run `train` when fine-tuning is disabled, but `evaluate` and therefore full `dvc exp run` will fail until the baseline weights are pulled locally.
+- A fresh clone without `models/current_best/best.pt` can run `train` when fine-tuning is disabled, but `evaluate` and therefore full `dvc exp run` will fail until the baseline weights are pulled locally.
 
 ## Baseline Semantics
 
@@ -131,7 +119,7 @@ State machine:
 
 Fresh-clone DVC behavior:
 
-- The preflight stage `check_optional_weight_deps` creates a 0-byte placeholder for optional weight paths such as `models/current_best/best.pt`.
+- The preflight stage `check_optional_weight_deps` creates 0-byte placeholders for optional configured weight paths such as `models/current_best/best.pt` and `models/finetune/best.pt`.
 - That placeholder exists only so DVC direct dependencies are valid on fresh clones.
 - Runtime code treats empty files as missing; the placeholder is never used as a real model.
 
@@ -161,9 +149,17 @@ Project parameters live in `params.yaml`.
 Useful configuration rules:
 
 - `train.image_size`, `train.epochs`, and `train.batch_size` are shared defaults.
+- `train.finetune.weights` is an optional fine-tune input path and defaults to `models/finetune/best.pt`.
+- The promoted comparison baseline stays at `models/current_best/best.pt` and is tracked separately via DVC.
 - `models_defaults.<backend>` applies per-backend defaults to every model of that backend.
 - `models.<key>` overrides both shared and backend defaults.
 - `models.<key>.asset_id` identifies the pretrained asset to bootstrap for the selected backend.
+
+If you want to fine-tune from the promoted baseline, set:
+
+```bash
+dvc exp run -S train.finetune.enabled=true -S train.finetune.weights=models/current_best/best.pt
+```
 
 Run the full DVC experiment pipeline:
 
@@ -231,7 +227,7 @@ This repo keeps `metadata.yaml` and `model_config.py` in Git, while `best.pt` is
 
 ## Current Project Context
 
-This project currently trains the following merged output classes:
+This project trains the following merged output classes:
 
 - `waste`
 - `cigarette`
@@ -239,10 +235,6 @@ This project currently trains the following merged output classes:
 - `leaves_sparse`
 
 The raw class mapping is configured in `params.yaml`.
-
-## Derived Repos
-
-`setup_project.py` remains only as a helper for future derived-repo bootstrap work. It is not part of the supported clone/train workflow for the live `waste-detection` project.
 
 ## Training Backend
 

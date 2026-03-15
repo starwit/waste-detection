@@ -390,7 +390,7 @@ def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) ->
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": "models/current_best/best.pt",
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {
@@ -459,6 +459,62 @@ def test_dvc_train_model_finetune_requires_existing_weights(tmp_path: Path) -> N
     assert result.returncode != 0
     combined = (result.stdout or "") + "\n" + (result.stderr or "")
     assert "Fine-tuning mode is enabled" in combined
+
+
+def test_dvc_train_model_does_not_rerun_when_baseline_changes_if_finetune_disabled(
+    tmp_path: Path,
+) -> None:
+    """Promoting or pulling the baseline must not invalidate `train_model` by itself."""
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = tmp_path / "repo"
+    _copy_workspace(repo_root, workspace)
+    _install_ultralytics_stub(workspace)
+
+    baseline_weights = create_baseline_artifact(
+        workspace,
+        experiment_name="promoted-baseline",
+    )
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {"dataset_name": "dvc-baseline-decoupled"},
+            "train": {
+                "model": "yolov8n",
+                "epochs": 1,
+                "batch_size": 1,
+                "finetune": {
+                    "enabled": False,
+                    "weights": "models/finetune/best.pt",
+                },
+            },
+            "models": {
+                "yolov8n": {
+                    "backend": "yolo",
+                    "asset_id": "yolov8n.pt",
+                }
+            },
+            "evaluation": {
+                "baseline_weights_path": str(baseline_weights),
+            },
+        },
+    )
+    create_local_yolo_checkpoint(workspace)
+
+    env = _make_env(workspace)
+    _init_dvc_workspace(workspace, env)
+
+    _run_dvc(workspace, env, "repro", "train_model", check=True)
+    marker = workspace / "runs" / ".last_train_result.json"
+    assert marker.exists()
+    first_mtime = marker.stat().st_mtime_ns
+
+    baseline_weights.write_bytes(b"updated-baseline-weights")
+
+    _run_dvc(workspace, env, "repro", "train_model", check=True)
+    second_mtime = marker.stat().st_mtime_ns
+    assert second_mtime == first_mtime
 
 
 def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) -> None:
@@ -536,7 +592,7 @@ def test_dvc_evaluate_model_succeeds_without_local_baseline_file(tmp_path: Path)
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": "models/current_best/best.pt",
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {
@@ -604,7 +660,7 @@ def test_dvc_evaluate_model_fails_when_promoted_baseline_weights_missing(tmp_pat
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": "models/current_best/best.pt",
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {
@@ -665,7 +721,7 @@ def test_dvc_full_pipeline_existing_project_with_promoted_baseline(tmp_path: Pat
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": str(baseline_weights),
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {
@@ -737,7 +793,7 @@ def test_dvc_full_pipeline_rtmdet_contract_with_promoted_baseline(tmp_path: Path
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": str(baseline_weights),
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {
@@ -807,7 +863,7 @@ def test_dvc_evaluate_model_writes_merged_class_metrics_for_project_mapping(tmp_
                 "batch_size": 1,
                 "finetune": {
                     "enabled": False,
-                    "weights": "models/current_best/best.pt",
+                    "weights": "models/finetune/best.pt",
                 },
             },
             "models": {

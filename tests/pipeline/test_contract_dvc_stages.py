@@ -46,5 +46,10 @@ def test_dvc_stage_contracts_are_split_for_bootstrap_prepare_train_evaluate() ->
 
     train_deps = stages["train_model"].get("deps", [])
     evaluate_deps = stages["evaluate_model"].get("deps", [])
+    bootstrap_params = stages["bootstrap_model_assets"].get("params", [])
+    train_params = stages["train_model"].get("params", [])
     assert ".tmp/bootstrap_manifest.json" in train_deps
     assert ".tmp/bootstrap_manifest.json" in evaluate_deps
+    assert "evaluation.baseline_weights_path" not in bootstrap_params
+    assert "evaluation.baseline_weights_path" not in train_params
+    assert "${evaluation.baseline_weights_path}" not in train_deps

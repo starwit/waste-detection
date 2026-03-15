@@ -32,7 +32,7 @@ BASE_PARAMS: Dict[str, Any] = {
         "batch_size": 1,
         "finetune": {
             "enabled": False,
-            "weights": "models/current_best/best.pt",
+            "weights": "models/finetune/best.pt",
             "lr": 0.0001,
             "epochs": 1,
             "freeze_backbone": False,
