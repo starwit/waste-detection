@@ -64,17 +64,31 @@ Typical fresh-clone setup:
 poetry install
 ```
 
+Note: `dvc exp run` creates experiment commits. If Git complains about missing user name/email, configure them (globally or in this repo):
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+Or only for this repo:
+
+```bash
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
 DVC access note:
 
 - The checked-in DVC remote for this repo uses SSH.
 - If you have access, `poetry run dvc pull` works as documented below.
-- If you do not have access, skip `poetry run dvc pull`, provide your own `raw_data/`, and use the local-only training path instead.
+- If you do not have access, skip `poetry run dvc pull`, provide your own `raw_data/`, and use the local workflow below.
 
-## Common States
+## Quick Start
 
-Use the path that matches your repo state.
+Pick one workflow. This repo is designed to be reproducible via its DVC remote (dataset + promoted baseline). If you don't have remote access you can still run the pipeline locally on your own data, but you won't get baseline comparison against this repo's promoted baseline.
 
-### 1. Fresh clone of the waste-detection project
+### Recommended: reproduce the promoted project (requires DVC remote access)
 
 Use this when you want the repo as promoted in Git and DVC:
 
@@ -82,78 +96,43 @@ Use this when you want the repo as promoted in Git and DVC:
 poetry install
 poetry run dvc pull raw_data
 poetry run dvc pull models/current_best/best.pt
-```
-
-Then run:
-
-```bash
 poetry run dvc exp run
 ```
 
-### 2. Fresh clone, but you want to train on your own local data
+### Without DVC remote access (local data, evaluation only)
 
-Use this when you want to replace the tracked dataset with new local inputs and train locally:
+Use this if you do not have access to this repo's DVC remote but still want to run `dvc exp run` end-to-end on your own data.
 
-1. Add or replace files under `raw_data/train/` and optionally `raw_data/test/`.
-2. Run the DVC training pipeline up to `train_model`:
+1. Put your training data under `raw_data/train/`.
+2. For evaluation, either provide `raw_data/test/` or set a non-zero test split (example below).
 
-```bash
-poetry run dvc exp run train_model
-```
-
-3. If you want full evaluation or the full `poetry run dvc exp run` workflow, pull the promoted baseline first:
+Run the full pipeline with a local baseline path (this disables baseline comparison):
 
 ```bash
-poetry run dvc pull models/current_best/best.pt
-```
-
-Then run the full experiment pipeline:
-
-```bash
-poetry run dvc exp run
+poetry run dvc exp run -n local \
+  -S evaluation.baseline_weights_path=models/local_only/best.pt \
+  -S prepare.test_split=0.2
 ```
 
 Notes:
 
-- `poetry run dvc add raw_data` is only needed if you want to version and publish your new dataset through DVC.
-- It is not required for a local training run.
+- This does not require this repo's DVC remote, but some backends may still download upstream pretrained assets (see `models_defaults.<backend>.allow_download`).
+- `models/local_only/best.pt` is intentionally treated as “no baseline” (no nearby `metadata.yaml`), so evaluation runs on the trained model only.
+- Don’t drop a real weights file into `models/local_only/best.pt` unless you also add matching `metadata.yaml` next to it.
 
-### 3. Fresh clone, but you only want to train and not evaluate yet
-
-This is possible without pulling the promoted baseline as long as training is not trying to fine-tune from it:
+If you later want baseline comparison against the promoted baseline in this repo, pull it explicitly and rerun without the override:
 
 ```bash
-poetry run dvc exp run train_model
+poetry run dvc pull models/current_best/best.pt
+poetry run dvc exp run
 ```
 
-This does not make the full project pipeline ready. `evaluate_model` and the full `poetry run dvc exp run` require the promoted baseline weights in this repo.
+## Baseline Behavior (why `dvc pull models/current_best/best.pt` matters)
 
-Why the baseline pull matters in this repo:
+This repo has a promoted baseline at `models/current_best/`. The baseline metadata is committed to Git (so everyone agrees what the baseline *is*), while the weights file is tracked via DVC.
 
-- This repo already contains promoted baseline metadata at `models/current_best/metadata.yaml`.
-- Because that metadata exists, evaluation treats the baseline as promoted and requires the matching local weights file.
-- A fresh clone without `models/current_best/best.pt` can run `train_model` when fine-tuning is disabled, but `evaluate_model` and therefore the full `poetry run dvc exp run` will fail until the baseline weights are pulled locally.
-
-## Baseline Semantics
-
-The project always keeps `evaluation.baseline_weights_path` configured so DVC can track the path explicitly.
-
-State machine:
-
-- Missing/empty baseline weights and no nearby `metadata.yaml`
-  This means “no promoted baseline yet”.
-  Evaluation skips baseline comparison.
-- Missing/empty baseline weights and nearby `metadata.yaml`
-  This means “a promoted baseline exists but is not present locally”.
-  Evaluation fails loudly and tells you to fetch it explicitly.
-- Non-empty baseline weights plus nearby `metadata.yaml`
-  Normal baseline comparison runs.
-
-Fresh-clone DVC behavior:
-
-- The preflight stage `check_optional_weight_deps` creates 0-byte placeholders for optional configured weight paths such as `models/current_best/best.pt` and `models/finetune/best.pt`.
-- That placeholder exists only so DVC direct dependencies are valid on fresh clones.
-- Runtime code treats empty files as missing; the placeholder is never used as a real model.
+- If `models/current_best/metadata.yaml` exists, evaluation expects the corresponding weights file to be present locally (pull it via DVC). If it’s missing, evaluation fails loudly so you don’t accidentally compare against “nothing”.
+- On a fresh clone, the pipeline creates 0-byte placeholders for configured weight paths so DVC stage dependencies are valid. Those placeholders are not usable weights; runtime code treats empty files as missing.
 
 ## Data Workflow
 
