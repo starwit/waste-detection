@@ -2043,6 +2043,22 @@ lint = ["pre-commit (==3.7.0)"]
 test = ["pytest (>=7.4)", "pytest-cov (>=4.1)"]
 
 [[package]]
+name = "markdown"
+version = "3.10.2"
+description = "Python implementation of John Gruber's Markdown."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "markdown-3.10.2-py3-none-any.whl", hash = "sha256:e91464b71ae3ee7afd3017d9f358ef0baf158fd9a298db92f1d4761133824c36"},
+    {file = "markdown-3.10.2.tar.gz", hash = "sha256:994d51325d25ad8aa7ce4ebaec003febcce822c3f8c911e3b17c52f7f589f950"},
+]
+
+[package.extras]
+docs = ["mdx_gh_links (>=0.2)", "mkdocs (>=1.6)", "mkdocs-gen-files", "mkdocs-literate-nav", "mkdocs-nature (>=0.6)", "mkdocs-section-index", "mkdocstrings[python] (>=0.28.3)"]
+testing = ["coverage", "pyyaml"]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
@@ -2229,34 +2245,6 @@ files = [
 ]
 
 [[package]]
-name = "mmcv"
-version = "2.1.0"
-description = "OpenMMLab Computer Vision Foundation"
-optional = false
-python-versions = ">=3.7"
-groups = ["main"]
-files = [
-    {file = "mmcv-2.1.0.tar.gz", hash = "sha256:d387bcab66b467479b6660310e23746cfc79c6e57acf04094680adb499a5cd3f"},
-]
-
-[package.dependencies]
-addict = "*"
-mmengine = ">=0.3.0"
-numpy = "*"
-opencv-python = ">=3"
-packaging = "*"
-Pillow = "*"
-pyyaml = "*"
-regex = {version = "*", markers = "sys_platform == \"win32\""}
-yapf = "*"
-
-[package.extras]
-all = ["Pillow", "PyTurboJPEG", "addict", "coverage", "lmdb", "mmengine (>=0.3.0)", "ninja", "numpy", "onnx", "onnxoptimizer", "onnxruntime", "packaging", "psutil", "pytest", "pytest-runner", "pyyaml", "regex ; sys_platform == \"win32\"", "scipy", "tifffile", "yapf"]
-build = ["pytest-runner"]
-optional = ["ninja", "psutil"]
-tests = ["PyTurboJPEG", "coverage", "lmdb", "onnx", "onnxoptimizer", "onnxruntime", "pytest", "scipy", "tifffile"]
-
-[[package]]
 name = "mmdet"
 version = "3.3.0"
 description = "OpenMMLab Detection Toolbox and Benchmark"
@@ -2313,6 +2301,24 @@ yapf = "*"
 [package.extras]
 all = ["addict", "aim (<=3.17.5) ; sys_platform != \"win32\"", "bitsandbytes", "clearml", "coverage", "dadaptation", "dvclive", "lion-pytorch", "lmdb", "matplotlib", "mlflow", "numpy", "parameterized", "pydantic (==1.10.9)", "pytest", "pyyaml", "regex ; sys_platform == \"win32\"", "rich", "termcolor", "transformers", "yapf"]
 tests = ["aim (<=3.17.5) ; sys_platform != \"win32\"", "bitsandbytes", "clearml", "coverage", "dadaptation", "dvclive", "lion-pytorch", "lmdb", "mlflow", "parameterized", "pydantic (==1.10.9)", "pytest", "transformers"]
+
+[[package]]
+name = "model-index"
+version = "0.1.11"
+description = "Create a source of truth for ML model results and browse it on Papers with Code"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "model-index-0.1.11.tar.gz", hash = "sha256:2f9870200f3b00813881b07b90d2c67291663534e43915c75fe476b6977bf2ad"},
+    {file = "model_index-0.1.11-py3-none-any.whl", hash = "sha256:a2a4d4431cd44e571d31e223cc4b0432663a62689de453bdb666e56a514b0e07"},
+]
+
+[package.dependencies]
+click = "*"
+markdown = "*"
+ordered-set = "*"
+pyyaml = "*"
 
 [[package]]
 name = "mpmath"
@@ -2784,7 +2790,7 @@ name = "object-detector-trainer"
 version = "0.1.0"
 description = "Reusable multi-backend object detection training core"
 optional = false
-python-versions = ">=3.11"
+python-versions = ">=3.11,<4.0"
 groups = ["main"]
 files = []
 develop = false
@@ -2793,11 +2799,11 @@ develop = false
 albumentations = ">=1.4.10"
 imagehash = ">=4.3.1"
 matplotlib = ">=3.9.0"
-mmcv = {version = ">=2.1.0,<2.2.0", optional = true}
 mmdet = {version = ">=3.3.0,<3.4.0", optional = true}
 mmengine = {version = ">=0.10.7,<0.11.0", optional = true}
 numpy = ">=2.2.0"
 opencv-python = ">=4.10.0.84"
+openmim = {version = ">=0.3.9", optional = true}
 pandas = ">=2.2.3"
 pillow = ">=11.0.0"
 pycocotools = ">=2.0.11"
@@ -2807,6 +2813,7 @@ rfdetr = ">=1.4.1"
 ruamel-yaml = ">=0.18.14"
 scikit-image = ">=0.25.0"
 scikit-learn = ">=1.5.0"
+setuptools = {version = ">=68.0.0,<82.0.0", optional = true}
 supervision = ">=0.22.0"
 tabulate = ">=0.9.0"
 torch = ">=2.0.0"
@@ -2814,14 +2821,13 @@ tqdm = ">=4.67.1"
 ultralytics = "8.3.191"
 
 [package.extras]
-dev = ["pytest (>=8.2.0)"]
-rtmdet = ["mmcv (>=2.1.0,<2.2.0)", "mmdet (>=3.3.0,<3.4.0)", "mmengine (>=0.10.7,<0.11.0)"]
+rtmdet = ["mmdet (>=3.3.0,<3.4.0)", "mmengine (>=0.10.7,<0.11.0)", "openmim (>=0.3.9)", "setuptools (>=68.0.0,<82.0.0)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/starwit/object-detector-trainer.git"
-reference = "37d9acaa1675e1e4a25f310c831e2a2f1c7f147a"
-resolved_reference = "37d9acaa1675e1e4a25f310c831e2a2f1c7f147a"
+reference = "092f1b6"
+resolved_reference = "092f1b61160ad5e6d18c6709258f65f8208d0fd2"
 
 [[package]]
 name = "omegaconf"
@@ -2884,6 +2890,82 @@ numpy = [
     {version = ">=1.23.5", markers = "python_version >= \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
 ]
+
+[[package]]
+name = "opendatalab"
+version = "0.0.10"
+description = "OpenDataLab Python SDK"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "opendatalab-0.0.10-py3-none-any.whl", hash = "sha256:b6a317785b7db418739933d4af6d981a0e45f6cf20a3e113bef63ed9b4488251"},
+    {file = "opendatalab-0.0.10.tar.gz", hash = "sha256:9b1382f974bd76a961747dc33308fce5b024d337c02cf3acb728c64952ca9aaf"},
+]
+
+[package.dependencies]
+click = ">=7.0.0"
+colorama = "*"
+openxlab = "*"
+pycryptodome = "*"
+pywin32 = {version = "*", markers = "platform_system == \"Windows\""}
+requests = ">=2.4.2"
+rich = "*"
+tqdm = "*"
+
+[[package]]
+name = "openmim"
+version = "0.3.9"
+description = "MIM Installs OpenMMLab packages"
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "openmim-0.3.9-py2.py3-none-any.whl", hash = "sha256:71581498b68767f8e1f340575b91c9994ccc93656901639f11300e46247da263"},
+    {file = "openmim-0.3.9.tar.gz", hash = "sha256:b3977b92232b4b8c4d987cbc73e4515826d5543ccd3a66d49fcfc602cc5b3352"},
+]
+
+[package.dependencies]
+Click = "*"
+colorama = "*"
+model-index = "*"
+opendatalab = "*"
+pandas = "*"
+pip = ">=19.3"
+requests = "*"
+rich = "*"
+tabulate = "*"
+
+[package.extras]
+all = ["Click", "colorama", "coverage", "docutils (==0.16.0)", "flake8", "interrogate", "model-index", "myst-parser", "opendatalab", "pandas", "pip (>=19.3)", "pytest", "pytorch-sphinx-theme", "requests", "rich", "sphinx (==4.0.2)", "sphinx-copybutton", "sphinx-markdown-tables", "tabulate"]
+tests = ["coverage", "flake8", "interrogate", "pytest"]
+
+[[package]]
+name = "openxlab"
+version = "0.0.11"
+description = "openxlab tools"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "openxlab-0.0.11-py3-none-any.whl", hash = "sha256:ab594a0f8c6f74501ab6c82a823c17bd2d038f72ee47a41fbac2c801df68565a"},
+    {file = "openxlab-0.0.11.tar.gz", hash = "sha256:bacc3ff3052432f4c3241cab7711e2cd6a4c4b80605dc3e8f2c157eddabd0cda"},
+]
+
+[[package]]
+name = "ordered-set"
+version = "4.1.0"
+description = "An OrderedSet is a custom MutableSet that remembers its order, so that every"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "ordered-set-4.1.0.tar.gz", hash = "sha256:694a8e44c87657c59292ede72891eb91d34131f6531463aab3009191c77364a8"},
+    {file = "ordered_set-4.1.0-py3-none-any.whl", hash = "sha256:046e1132c71fcf3330438a539928932caf51ddbc582496833e23de611de14562"},
+]
+
+[package.extras]
+dev = ["black", "mypy", "pytest"]
 
 [[package]]
 name = "orjson"
@@ -3331,6 +3413,18 @@ files = [
 tests = ["packaging", "pillow", "pytest", "pytest-cov", "test-image-results"]
 
 [[package]]
+name = "pip"
+version = "26.0.1"
+description = "The PyPA recommended tool for installing Python packages."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pip-26.0.1-py3-none-any.whl", hash = "sha256:bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b"},
+    {file = "pip-26.0.1.tar.gz", hash = "sha256:c4037d8a277c89b320abe636d59f91e6d0922d08a05b60e85e53b296613346d8"},
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.4.0"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
@@ -3646,6 +3740,57 @@ groups = ["main"]
 files = [
     {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
     {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
+]
+
+[[package]]
+name = "pycryptodome"
+version = "3.23.0"
+description = "Cryptographic library for Python"
+optional = false
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
+groups = ["main"]
+files = [
+    {file = "pycryptodome-3.23.0-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:a176b79c49af27d7f6c12e4b178b0824626f40a7b9fed08f712291b6d54bf566"},
+    {file = "pycryptodome-3.23.0-cp27-cp27m-manylinux2010_i686.whl", hash = "sha256:573a0b3017e06f2cffd27d92ef22e46aa3be87a2d317a5abf7cc0e84e321bd75"},
+    {file = "pycryptodome-3.23.0-cp27-cp27m-manylinux2010_x86_64.whl", hash = "sha256:63dad881b99ca653302b2c7191998dd677226222a3f2ea79999aa51ce695f720"},
+    {file = "pycryptodome-3.23.0-cp27-cp27m-win32.whl", hash = "sha256:b34e8e11d97889df57166eda1e1ddd7676da5fcd4d71a0062a760e75060514b4"},
+    {file = "pycryptodome-3.23.0-cp27-cp27mu-manylinux2010_i686.whl", hash = "sha256:7ac1080a8da569bde76c0a104589c4f414b8ba296c0b3738cf39a466a9fb1818"},
+    {file = "pycryptodome-3.23.0-cp27-cp27mu-manylinux2010_x86_64.whl", hash = "sha256:6fe8258e2039eceb74dfec66b3672552b6b7d2c235b2dfecc05d16b8921649a8"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:0011f7f00cdb74879142011f95133274741778abba114ceca229adbf8e62c3e4"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:90460fc9e088ce095f9ee8356722d4f10f86e5be06e2354230a9880b9c549aae"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4764e64b269fc83b00f682c47443c2e6e85b18273712b98aa43bcb77f8570477"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eb8f24adb74984aa0e5d07a2368ad95276cf38051fe2dc6605cbcf482e04f2a7"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d97618c9c6684a97ef7637ba43bdf6663a2e2e77efe0f863cce97a76af396446"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:9a53a4fe5cb075075d515797d6ce2f56772ea7e6a1e5e4b96cf78a14bac3d265"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_i686.whl", hash = "sha256:763d1d74f56f031788e5d307029caef067febf890cd1f8bf61183ae142f1a77b"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:954af0e2bd7cea83ce72243b14e4fb518b18f0c1649b576d114973e2073b273d"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-win32.whl", hash = "sha256:257bb3572c63ad8ba40b89f6fc9d63a2a628e9f9708d31ee26560925ebe0210a"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-win_amd64.whl", hash = "sha256:6501790c5b62a29fcb227bd6b62012181d886a767ce9ed03b303d1f22eb5c625"},
+    {file = "pycryptodome-3.23.0-cp313-cp313t-win_arm64.whl", hash = "sha256:9a77627a330ab23ca43b48b130e202582e91cc69619947840ea4d2d1be21eb39"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:187058ab80b3281b1de11c2e6842a357a1f71b42cb1e15bce373f3d238135c27"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-macosx_10_9_x86_64.whl", hash = "sha256:cfb5cd445280c5b0a4e6187a7ce8de5a07b5f3f897f235caa11f1f435f182843"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:67bd81fcbe34f43ad9422ee8fd4843c8e7198dd88dd3d40e6de42ee65fbe1490"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:aa0698f65e5b570426fc31b8162ed4603b0c2841cbb9088e2b01641e3065915b"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:53ecbafc2b55353edcebd64bf5da94a2a2cdf5090a6915bcca6eca6cc452585a"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:156df9667ad9f2ad26255926524e1c136d6664b741547deb0a86a9acf5ea631f"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:dea827b4d55ee390dc89b2afe5927d4308a8b538ae91d9c6f7a5090f397af1aa"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-win32.whl", hash = "sha256:507dbead45474b62b2bbe318eb1c4c8ee641077532067fec9c1aa82c31f84886"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-win_amd64.whl", hash = "sha256:c75b52aacc6c0c260f204cbdd834f76edc9fb0d8e0da9fbf8352ef58202564e2"},
+    {file = "pycryptodome-3.23.0-cp37-abi3-win_arm64.whl", hash = "sha256:11eeeb6917903876f134b56ba11abe95c0b0fd5e3330def218083c7d98bbcb3c"},
+    {file = "pycryptodome-3.23.0-pp27-pypy_73-manylinux2010_x86_64.whl", hash = "sha256:350ebc1eba1da729b35ab7627a833a1a355ee4e852d8ba0447fafe7b14504d56"},
+    {file = "pycryptodome-3.23.0-pp27-pypy_73-win32.whl", hash = "sha256:93837e379a3e5fd2bb00302a47aee9fdf7940d83595be3915752c74033d17ca7"},
+    {file = "pycryptodome-3.23.0-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:ddb95b49df036ddd264a0ad246d1be5b672000f12d6961ea2c267083a5e19379"},
+    {file = "pycryptodome-3.23.0-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d8e95564beb8782abfd9e431c974e14563a794a4944c29d6d3b7b5ea042110b4"},
+    {file = "pycryptodome-3.23.0-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:14e15c081e912c4b0d75632acd8382dfce45b258667aa3c67caf7a4d4c13f630"},
+    {file = "pycryptodome-3.23.0-pp310-pypy310_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:a7fc76bf273353dc7e5207d172b83f569540fc9a28d63171061c42e361d22353"},
+    {file = "pycryptodome-3.23.0-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:45c69ad715ca1a94f778215a11e66b7ff989d792a4d63b68dc586a1da1392ff5"},
+    {file = "pycryptodome-3.23.0-pp39-pypy39_pp73-macosx_10_15_x86_64.whl", hash = "sha256:865d83c906b0fc6a59b510deceee656b6bc1c4fa0d82176e2b77e97a420a996a"},
+    {file = "pycryptodome-3.23.0-pp39-pypy39_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:89d4d56153efc4d81defe8b65fd0821ef8b2d5ddf8ed19df31ba2f00872b8002"},
+    {file = "pycryptodome-3.23.0-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e3f2d0aaf8080bda0587d58fc9fe4766e012441e2eed4269a77de6aea981c8be"},
+    {file = "pycryptodome-3.23.0-pp39-pypy39_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:64093fc334c1eccfd3933c134c4457c34eaca235eeae49d69449dc4728079339"},
+    {file = "pycryptodome-3.23.0-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:ce64e84a962b63a47a592690bdc16a7eaf709d2c2697ababf24a0def566899a6"},
+    {file = "pycryptodome-3.23.0.tar.gz", hash = "sha256:447700a657182d60338bab09fdb27518f8856aecd80ae4c6bdddb67ff5da44ef"},
 ]
 
 [[package]]
@@ -4026,7 +4171,7 @@ description = "Python for Window Extensions"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "sys_platform == \"win32\""
+markers = "sys_platform == \"win32\" or platform_system == \"Windows\""
 files = [
     {file = "pywin32-311-cp310-cp310-win32.whl", hash = "sha256:d03ff496d2a0cd4a5893504789d4a15399133fe82517455e78bad62efbb7f0a3"},
     {file = "pywin32-311-cp310-cp310-win_amd64.whl", hash = "sha256:797c2772017851984b97180b0bebe4b620bb86328e8a884bb626156295a63b3b"},
@@ -5848,4 +5993,4 @@ test = ["zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "2cfe42821b58cdfa4bc5c2a72e91c0fb07bfe7a28fa0c1649e994d2fcb0bb956"
+content-hash = "08435d079cd5c4a34875d78e68e15813b20571f6f3f2e87b6b79bd39bf56deda"

@@ -15,8 +15,25 @@ Supported backends in this project:
 
 RTMDet/OpenMMLab note:
 
-- This project installs `object-detector-trainer` with RTMDet extras enabled.
-- If your local OpenMMLab runtime fails to install or import cleanly, use Python 3.11: `poetry env use 3.11`.
+This project installs `object-detector-trainer` with RTMDet extras enabled.
+
+RTMDet requires full `mmcv` ops (`mmcv`, not `mmcv-lite`). Two supported install methods:
+
+Method 1: OpenMMLab prebuilt wheels
+
+```bash
+poetry run mim install mmcv==2.1.0
+poetry run python -c "import mmcv._ext"
+```
+
+Method 2: build from source (requires a working CUDA toolkit and a C++ compiler)
+
+```bash
+MMCV_WITH_OPS=1 poetry run pip install "mmcv==2.1.0" --no-binary=mmcv --no-build-isolation --no-cache-dir
+poetry run python -c "import mmcv._ext"
+```
+
+Recommended Python for RTMDet/OpenMMLab: 3.11 (`poetry env use 3.11`).
 
 ## Testing
 
@@ -27,16 +44,17 @@ Project-level tests in this repo:
 - `poetry run pytest`
   Fast contract tests for config resolution, wrapper behavior, and offline pipeline contracts.
 - `poetry run pytest --heavy`
-  Heavy project integration tests for DVC stage wiring, fresh-clone behavior, rerun invalidation, baseline semantics, and project outputs.
-  These tests run the project pipeline stages with lightweight backend stubs where appropriate so they stay deterministic and do not depend on downloading real model assets.
+  Heavy project integration tests for DVC experiment wiring, fresh-clone behavior, rerun invalidation, baseline semantics, and project outputs.
+  These tests execute `dvc exp run` inside temporary git-backed workspaces and use lightweight backend stubs so they stay deterministic and do not depend on downloading real model assets.
 
 Trainer-level tests in `object-detector-trainer`:
 
 - Real backend-specific one-epoch contracts live in the trainer repo, not in this project repo.
 - Run those from an `object-detector-trainer` checkout when you change trainer behavior.
-- Those heavy trainer tests call real bootstrap directly.
-- The first heavy trainer run may download backend assets; later runs reuse the shared cache under `models/pretrained/`.
-- The trainer repo uses editable `pip` installs, not Poetry commands.
+- Those heavy trainer tests call real bootstrap directly and run one canonical real-training model per supported backend.
+- The trainer heavy suite fails if a new backend is added to the supported-backend registry without adding a representative heavy-test case for it.
+- The first heavy trainer run may download backend assets; later runs reuse the shared cache under `models/pretrained/<backend>/`.
+- The trainer repo uses Poetry for installs and test runs.
 
 ## Clone And Setup
 
@@ -45,6 +63,12 @@ Typical fresh-clone setup:
 ```bash
 poetry install
 ```
+
+DVC access note:
+
+- The checked-in DVC remote for this repo uses SSH.
+- If you have access, `dvc pull` works as documented below.
+- If you do not have access, skip `dvc pull`, provide your own `raw_data/`, and use the local-only training path instead.
 
 ## Common States
 
@@ -68,21 +92,33 @@ dvc exp run
 
 ### 2. Fresh clone, but you want to train on your own local data
 
-Use this when you want to replace the tracked dataset with new local inputs:
+Use this when you want to replace the tracked dataset with new local inputs and train locally:
 
 1. Add or replace files under `raw_data/train/` and optionally `raw_data/test/`.
-2. Run `dvc add raw_data` after the dataset is in place.
-3. Pull the promoted baseline before running the full pipeline:
+2. Run the local training stages:
+
+```bash
+python -m train --stage bootstrap
+python -m train --stage prepare
+python -m train --stage train
+```
+
+3. If you want full evaluation or `dvc exp run`, pull the promoted baseline first:
 
 ```bash
 dvc pull models/current_best/best.pt
 ```
 
-Then run:
+Then run the full experiment pipeline:
 
 ```bash
 dvc exp run
 ```
+
+Notes:
+
+- `dvc add raw_data` is only needed if you want to version and publish your new dataset through DVC.
+- It is not required for a local training run.
 
 ### 3. Fresh clone, but you only want to train and not evaluate yet
 
@@ -96,7 +132,7 @@ python -m train --stage train
 
 This does not make the full project pipeline ready. `evaluate` and `dvc exp run` require the promoted baseline weights in this repo.
 
-Why the baseline pull matters:
+Why the baseline pull matters in this repo:
 
 - This repo already contains promoted baseline metadata at `models/current_best/metadata.yaml`.
 - Because that metadata exists, evaluation treats the baseline as promoted and requires the matching local weights file.
@@ -134,6 +170,8 @@ git commit -m "Update training data"
 dvc push
 git push
 ```
+
+For a local-only experiment, you can skip `dvc add`, `dvc push`, and the Git steps entirely.
 
 Expected raw data layout:
 
