@@ -2826,8 +2826,8 @@ rtmdet = ["mmdet (>=3.3.0,<3.4.0)", "mmengine (>=0.10.7,<0.11.0)", "openmim (>=0
 [package.source]
 type = "git"
 url = "https://github.com/starwit/object-detector-trainer.git"
-reference = "092f1b6"
-resolved_reference = "092f1b61160ad5e6d18c6709258f65f8208d0fd2"
+reference = "8dec470"
+resolved_reference = "8dec4706fd6d5b1bd1721c2046700ad047e79e8e"
 
 [[package]]
 name = "omegaconf"
@@ -5993,4 +5993,4 @@ test = ["zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "08435d079cd5c4a34875d78e68e15813b20571f6f3f2e87b6b79bd39bf56deda"
+content-hash = "524969616fffd5a6af4a4a0afb7216172fb6e9770e359e657e2bfae5bf615dfc"

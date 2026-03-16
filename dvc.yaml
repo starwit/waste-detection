@@ -21,6 +21,7 @@ stages:
       --model ${train.model}
     params:
       - train.model
+      - models_defaults
       - models
     deps:
       - train.py
@@ -61,6 +62,7 @@ stages:
       - prepare.val_split
       - prepare.auto_replay
       - train
+      - models_defaults
       - models
     deps:
       - train.py

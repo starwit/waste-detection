@@ -4,8 +4,8 @@ This repository contains the `waste-detection` training project. It uses DVC to 
 
 Project entrypoints:
 
-- `python -m train` delegates to `object-detector-trainer` with project-local defaults for `--workspace-root` and `--config`.
-- `dvc exp run` executes the project pipeline stages defined in `dvc.yaml`.
+- `poetry run dvc exp run` is the primary project workflow and executes the stages defined in `dvc.yaml`.
+- `poetry run python -m train` is the lower-level entrypoint for manual stage execution when needed.
 
 Supported backends in this project:
 
@@ -45,7 +45,7 @@ Project-level tests in this repo:
   Fast contract tests for config resolution, wrapper behavior, and offline pipeline contracts.
 - `poetry run pytest --heavy`
   Heavy project integration tests for DVC experiment wiring, fresh-clone behavior, rerun invalidation, baseline semantics, and project outputs.
-  These tests execute `dvc exp run` inside temporary git-backed workspaces and use lightweight backend stubs so they stay deterministic and do not depend on downloading real model assets.
+  These tests execute the project `dvc exp run` workflow inside temporary git-backed workspaces and use lightweight backend stubs so they stay deterministic and do not depend on downloading real model assets.
 
 Trainer-level tests in `object-detector-trainer`:
 
@@ -67,8 +67,8 @@ poetry install
 DVC access note:
 
 - The checked-in DVC remote for this repo uses SSH.
-- If you have access, `dvc pull` works as documented below.
-- If you do not have access, skip `dvc pull`, provide your own `raw_data/`, and use the local-only training path instead.
+- If you have access, `poetry run dvc pull` works as documented below.
+- If you do not have access, skip `poetry run dvc pull`, provide your own `raw_data/`, and use the local-only training path instead.
 
 ## Common States
 
@@ -80,14 +80,14 @@ Use this when you want the repo as promoted in Git and DVC:
 
 ```bash
 poetry install
-dvc pull raw_data
-dvc pull models/current_best/best.pt
+poetry run dvc pull raw_data
+poetry run dvc pull models/current_best/best.pt
 ```
 
 Then run:
 
 ```bash
-dvc exp run
+poetry run dvc exp run
 ```
 
 ### 2. Fresh clone, but you want to train on your own local data
@@ -95,48 +95,45 @@ dvc exp run
 Use this when you want to replace the tracked dataset with new local inputs and train locally:
 
 1. Add or replace files under `raw_data/train/` and optionally `raw_data/test/`.
-2. Run the local training stages:
+2. Run the DVC training pipeline up to `train_model`:
 
 ```bash
-python -m train --stage bootstrap
-python -m train --stage prepare
-python -m train --stage train
+poetry run dvc exp run train_model
 ```
 
-3. If you want full evaluation or `dvc exp run`, pull the promoted baseline first:
+3. If you want full evaluation or the full `poetry run dvc exp run` workflow, pull the promoted baseline first:
 
 ```bash
-dvc pull models/current_best/best.pt
+poetry run dvc pull models/current_best/best.pt
 ```
 
 Then run the full experiment pipeline:
 
 ```bash
-dvc exp run
+poetry run dvc exp run
 ```
 
 Notes:
 
-- `dvc add raw_data` is only needed if you want to version and publish your new dataset through DVC.
+- `poetry run dvc add raw_data` is only needed if you want to version and publish your new dataset through DVC.
 - It is not required for a local training run.
+- Manual `poetry run python -m train --stage ...` execution is still supported, but DVC is the documented project workflow.
 
 ### 3. Fresh clone, but you only want to train and not evaluate yet
 
 This is possible without pulling the promoted baseline as long as training is not trying to fine-tune from it:
 
 ```bash
-python -m train --stage bootstrap
-python -m train --stage prepare
-python -m train --stage train
+poetry run dvc exp run train_model
 ```
 
-This does not make the full project pipeline ready. `evaluate` and `dvc exp run` require the promoted baseline weights in this repo.
+This does not make the full project pipeline ready. `evaluate_model` and the full `poetry run dvc exp run` require the promoted baseline weights in this repo.
 
 Why the baseline pull matters in this repo:
 
 - This repo already contains promoted baseline metadata at `models/current_best/metadata.yaml`.
 - Because that metadata exists, evaluation treats the baseline as promoted and requires the matching local weights file.
-- A fresh clone without `models/current_best/best.pt` can run `train` when fine-tuning is disabled, but `evaluate` and therefore full `dvc exp run` will fail until the baseline weights are pulled locally.
+- A fresh clone without `models/current_best/best.pt` can run `train_model` when fine-tuning is disabled, but `evaluate_model` and therefore the full `poetry run dvc exp run` will fail until the baseline weights are pulled locally.
 
 ## Baseline Semantics
 
@@ -164,14 +161,14 @@ Fresh-clone DVC behavior:
 When you update the dataset for this project:
 
 ```bash
-dvc add raw_data
+poetry run dvc add raw_data
 git add raw_data.dvc
 git commit -m "Update training data"
-dvc push
+poetry run dvc push
 git push
 ```
 
-For a local-only experiment, you can skip `dvc add`, `dvc push`, and the Git steps entirely.
+For a local-only experiment, you can skip `poetry run dvc add`, `poetry run dvc push`, and the Git steps entirely.
 
 Expected raw data layout:
 
@@ -196,46 +193,46 @@ Useful configuration rules:
 If you want to fine-tune from the promoted baseline, set:
 
 ```bash
-dvc exp run -S train.finetune.enabled=true -S train.finetune.weights=models/current_best/best.pt
+poetry run dvc exp run -S train.finetune.enabled=true -S train.finetune.weights=models/current_best/best.pt
 ```
 
 Run the full DVC experiment pipeline:
 
 ```bash
-dvc exp run -n "my-experiment"
+poetry run dvc exp run -n "my-experiment"
 ```
 
 Override parameters for a one-off experiment:
 
 ```bash
-dvc exp run -n "test-smaller-batch" -S train.batch_size=4
+poetry run dvc exp run -n "test-smaller-batch" -S train.batch_size=4
 ```
 
-Manual stage execution:
+Manual stage execution remains available when you explicitly want to bypass DVC:
 
 ```bash
-python -m train --stage bootstrap
-python -m train --stage prepare
-python -m train --stage train
-python -m train --stage evaluate
+poetry run python -m train --stage bootstrap
+poetry run python -m train --stage prepare
+poetry run python -m train --stage train
+poetry run python -m train --stage evaluate
 ```
 
 Or run the full flow directly:
 
 ```bash
-python -m train --stage all
+poetry run python -m train --stage all
 ```
 
 Review local experiment results:
 
 ```bash
-dvc exp show --sort-by metrics/fitness --sort-order desc
+poetry run dvc exp show --sort-by metrics/fitness --sort-order desc
 ```
 
 Promote an experiment into your workspace:
 
 ```bash
-dvc exp apply <experiment-name>
+poetry run dvc exp apply <experiment-name>
 ```
 
 ## Promoting A New Baseline
@@ -243,14 +240,14 @@ dvc exp apply <experiment-name>
 To make a trained run the new comparison baseline:
 
 ```bash
-python tools/export_baseline.py --run-dir runs/<experiment_name>
+poetry run python tools/export_baseline.py --run-dir runs/<experiment_name>
 ```
 
 Then track the promoted artifacts explicitly:
 
 ```bash
-dvc add models/current_best/best.pt
-dvc push
+poetry run dvc add models/current_best/best.pt
+poetry run dvc push
 git add models/current_best/best.pt.dvc
 git add models/current_best/metadata.yaml
 ```
