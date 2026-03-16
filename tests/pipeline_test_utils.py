@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Shared helpers for assembling the lightweight datasets/params used in tests."""
+"""Project-side test fixtures for DVC and wrapper coverage.
+
+These helpers stay intentionally small and mostly YOLO-oriented because the
+generic multi-backend pipeline contract coverage lives in
+`object-detector-trainer`.
+"""
 
 import copy
 from pathlib import Path
@@ -40,29 +45,11 @@ BASE_PARAMS: Dict[str, Any] = {
     },
     "models_defaults": {
         "yolo": {"cache_dir": "models/pretrained/yolo", "allow_download": True},
-        "rfdetr": {"cache_dir": "models/pretrained/rfdetr", "allow_download": True},
-        "rtmdet": {"cache_dir": "models/pretrained/rtmdet", "allow_download": True},
     },
     "models": {
         "yolov8n": {
             "backend": "yolo",
             "asset_id": "yolov8n.pt",
-        },
-        "rfdetr-nano": {
-            "backend": "rfdetr",
-            "variant": "nano",
-            "asset_id": "rf-detr-nano.pth",
-            "resolution": 320,
-            "epochs": 1,
-            "batch_size": 1,
-            "grad_accum_steps": 1,
-        },
-        "rtmdet-tiny": {
-            "backend": "rtmdet",
-            "asset_id": "rtmdet_tiny_8xb32-300e_coco",
-            "epochs": 1,
-            "batch_size": 1,
-            "image_size": 320,
         },
     },
     "evaluation": {
@@ -101,39 +88,6 @@ def create_local_yolo_checkpoint(
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_path.write_bytes(payload)
     return resolved_path
-
-
-def create_local_rfdetr_checkpoint(
-    workspace: Path,
-    *,
-    checkpoint_path: str = "models/pretrained/rfdetr/rf-detr-nano.pth",
-    payload: bytes = b"stub-rfdetr-checkpoint",
-) -> Path:
-    resolved_path = _resolve_workspace_path(workspace, checkpoint_path)
-    if resolved_path is None:
-        raise ValueError("checkpoint_path must be provided for local RF-DETR checkpoint creation.")
-    resolved_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved_path.write_bytes(payload)
-    return resolved_path
-
-
-def create_local_rtmdet_assets(
-    workspace: Path,
-    *,
-    asset_id: str = "rtmdet_tiny_8xb32-300e_coco",
-    cache_dir: str = "models/pretrained/rtmdet",
-    checkpoint_suffix: str = "_stub.pth",
-) -> tuple[Path, Path]:
-    resolved_cache_dir = _resolve_workspace_path(workspace, cache_dir)
-    if resolved_cache_dir is None:
-        raise ValueError("cache_dir must be provided for local RTMDet asset creation.")
-
-    resolved_cache_dir.mkdir(parents=True, exist_ok=True)
-    config_path = resolved_cache_dir / f"{asset_id}.py"
-    checkpoint_path = resolved_cache_dir / f"{asset_id}{checkpoint_suffix}"
-    config_path.write_text("# stub rtmdet config\n", encoding="utf-8")
-    checkpoint_path.write_bytes(b"stub-rtmdet-checkpoint")
-    return config_path, checkpoint_path
 
 
 def create_baseline_artifact(

@@ -2,10 +2,10 @@
 
 This repository contains the `waste-detection` training project. It uses DVC to track datasets, experiments, and the promoted comparison baseline, while the reusable training backend lives in the external `object-detector-trainer` package.
 
-Project entrypoints:
+Project workflow:
 
-- `poetry run dvc exp run` is the primary project workflow and executes the stages defined in `dvc.yaml`.
-- `poetry run python -m train` is the lower-level entrypoint for manual stage execution when needed.
+- `poetry run dvc exp run` is the documented project workflow and executes the stages defined in `dvc.yaml`.
+- `train.py` is the thin project wrapper invoked by the DVC stages.
 
 Supported backends in this project:
 
@@ -117,7 +117,6 @@ Notes:
 
 - `poetry run dvc add raw_data` is only needed if you want to version and publish your new dataset through DVC.
 - It is not required for a local training run.
-- Manual `poetry run python -m train --stage ...` execution is still supported, but DVC is the documented project workflow.
 
 ### 3. Fresh clone, but you only want to train and not evaluate yet
 
@@ -206,21 +205,6 @@ Override parameters for a one-off experiment:
 
 ```bash
 poetry run dvc exp run -n "test-smaller-batch" -S train.batch_size=4
-```
-
-Manual stage execution remains available when you explicitly want to bypass DVC:
-
-```bash
-poetry run python -m train --stage bootstrap
-poetry run python -m train --stage prepare
-poetry run python -m train --stage train
-poetry run python -m train --stage evaluate
-```
-
-Or run the full flow directly:
-
-```bash
-poetry run python -m train --stage all
 ```
 
 Review local experiment results:
