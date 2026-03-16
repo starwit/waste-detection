@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "waste-detection"
 version = "0.1.0"
-description = ""
-authors = ["Your Name <you@example.com>"]
+description = "Waste detection training project built on the object-detector-trainer backend"
+authors = ["edblu1"]
 readme = "README.md"
 package-mode = false
 
@@ -12,7 +12,7 @@ dvc = "^3.60.1"
 dvc-ssh = "^4.2.1"
 ruamel-yaml = "^0.18.14"
 pyyaml = "^6.0.2"
-object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", rev = "4b145f9", extras = ["rtmdet"] }
+object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", rev = "860b7c4", extras = ["rtmdet"] }
 
 
 [tool.poetry.group.dev.dependencies]
