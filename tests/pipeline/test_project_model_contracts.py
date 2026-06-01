@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from object_detector_trainer.backends.registry import (
+    REQUIRED_RESOLVED_FIELDS,
+    SUPPORTED_BACKEND_NAMES,
     normalize_backend_name,
-    required_resolved_fields,
-    supported_backend_names,
 )
 from object_detector_trainer.backends.training_config import resolve_training_config
 from object_detector_trainer.config.loader import load_config
@@ -36,7 +36,7 @@ def _discover_project_model_expectations() -> list[tuple[str, str, list[str]]]:
             (
                 str(model_key),
                 backend,
-                list(required_resolved_fields(backend)),
+                list(REQUIRED_RESOLVED_FIELDS[backend]),
             )
         )
     return expectations
@@ -83,7 +83,7 @@ def test_project_params_schema_validates() -> None:
         f"train.model={cfg.train.model!r} is not present in the models dict"
     )
     assert cfg.prepare.folder_subsets, "folder_subsets must be non-empty"
-    assert configured_backends == set(supported_backend_names()), (
+    assert configured_backends == set(SUPPORTED_BACKEND_NAMES), (
         "params.yaml must declare at least one model for every supported backend. "
-        f"Configured={sorted(configured_backends)}, supported={sorted(supported_backend_names())}"
+        f"Configured={sorted(configured_backends)}, supported={sorted(SUPPORTED_BACKEND_NAMES)}"
     )
