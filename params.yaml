@@ -26,6 +26,8 @@ data:
 
 prepare:
   val_split: 0.1
+  # Used only when raw_data/test is absent. If raw_data/test contains images,
+  # that explicit test folder is used and this split is ignored.
   test_split: 0.1
   augment_multiplier: 1
   # Optional: automatically build/maintain a small replay set from last run's
@@ -38,7 +40,6 @@ prepare:
     conf_thr: 0.25         # prediction threshold
     border_conf: 0.35      # below this = borderline TP counted
     include_empty: true    # include some background/empty frames
-    seed: 42
     dest: raw_data/train/replay  # persistent location for replay set
   # Folder subset configuration - use only a percentage of images from specific folders
   folder_subsets:

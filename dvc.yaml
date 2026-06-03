@@ -74,7 +74,8 @@ stages:
       # Optional direct dependency: placeholder created by the preflight stage.
       - ${train.finetune.weights}
     outs:
-      - runs
+      - .dvc_artifacts/train_runs
+      - .dvc_artifacts/last_train_result.json
 
   evaluate_model:
     cmd: >
@@ -94,11 +95,12 @@ stages:
       - poetry.lock
       - .tmp/dvc_bootstrap.txt
       - .tmp/bootstrap_manifest.json
-      - runs/.last_train_result.json
-      - runs
+      - .dvc_artifacts/last_train_result.json
+      - .dvc_artifacts/train_runs
       # Optional direct dependency: placeholder created by the preflight stage.
       - ${evaluation.baseline_weights_path}
     outs:
+      - runs
       - results_comparison/
     metrics:
       - metrics.json

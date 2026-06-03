@@ -74,9 +74,14 @@ def _copy_workspace(src: Path, dst: Path) -> None:
 
 def _make_env(workspace: Path) -> dict[str, str]:
     env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        f"{workspace}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
-    )
+    pythonpath = [str(workspace)]
+    trainer_checkout = Path(__file__).resolve().parents[2].parent / "object-detector-trainer"
+    if trainer_checkout.exists():
+        pythonpath.append(str(trainer_checkout))
+    current_pythonpath = env.get("PYTHONPATH")
+    if current_pythonpath:
+        pythonpath.append(current_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath)
     env["DVC_NO_ANALYTICS"] = "1"
     python_dir = Path(sys.executable).parent
     env["PATH"] = f"{python_dir}{os.pathsep}{env['PATH']}"
@@ -161,7 +166,19 @@ def _assert_eval_artifacts(workspace: Path) -> None:
     assert (results_dir / "results.csv").exists()
     assert (results_dir / "results.txt").exists()
     assert (workspace / "metrics.json").exists()
-    assert (workspace / "runs" / ".last_train_result.json").exists()
+    marker = workspace / "runs" / ".last_train_result.json"
+    assert marker.exists()
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    run_dir = Path(payload["train_output_dir"])
+    if not run_dir.is_absolute():
+        run_dir = workspace / run_dir
+    assert (run_dir / "weights" / "best.pt").exists()
+    assert (run_dir / "metadata.yaml").exists()
+    assert (run_dir / "train_dataset.yaml").exists()
+    assert (run_dir / "test_dataset.yaml").exists()
+    assert (run_dir / "test_results.csv").exists()
+    assert (run_dir / "results.csv").exists()
+    assert (run_dir / "results.txt").exists()
 
 
 def _load_results_models(workspace: Path) -> list[str]:
@@ -216,7 +233,7 @@ def test_dvc_train_model_reruns_when_finetune_weights_param_changes(tmp_path: Pa
     _init_dvc_workspace(workspace, env)
 
     _run_dvc(workspace, env, "exp", "run", "train_model", check=True)
-    marker = workspace / "runs" / ".last_train_result.json"
+    marker = workspace / ".dvc_artifacts" / "last_train_result.json"
     assert marker.exists()
     first_mtime = marker.stat().st_mtime
 
@@ -295,7 +312,7 @@ def test_dvc_train_model_succeeds_without_local_baseline_file(tmp_path: Path) ->
     _init_dvc_workspace(workspace, env)
     _run_dvc(workspace, env, "exp", "run", "train_model", check=True)
 
-    run_marker = workspace / "runs" / ".last_train_result.json"
+    run_marker = workspace / ".dvc_artifacts" / "last_train_result.json"
     assert run_marker.exists()
 
 
@@ -392,7 +409,7 @@ def test_dvc_train_model_does_not_rerun_when_baseline_changes_if_finetune_disabl
     _init_dvc_workspace(workspace, env)
 
     _run_dvc(workspace, env, "exp", "run", "train_model", check=True)
-    marker = workspace / "runs" / ".last_train_result.json"
+    marker = workspace / ".dvc_artifacts" / "last_train_result.json"
     assert marker.exists()
     first_mtime = marker.stat().st_mtime_ns
 
@@ -443,7 +460,7 @@ def test_dvc_train_model_finetune_succeeds_when_weights_exist(tmp_path: Path) ->
     _init_dvc_workspace(workspace, env)
     _run_dvc(workspace, env, "exp", "run", "train_model", check=True)
 
-    run_marker = workspace / "runs" / ".last_train_result.json"
+    run_marker = workspace / ".dvc_artifacts" / "last_train_result.json"
     assert run_marker.exists()
 
 
@@ -507,6 +524,74 @@ def test_dvc_evaluate_model_succeeds_without_local_baseline_file(tmp_path: Path)
     models = _load_results_models(workspace)
     assert models, models
     assert len(models) == 1, models
+
+
+def test_dvc_exp_apply_restores_complete_evaluated_run(tmp_path: Path) -> None:
+    """DVC restore contract: exp apply must restore final run-local eval reports."""
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = tmp_path / "repo"
+    _copy_workspace(repo_root, workspace)
+    _install_ultralytics_stub(workspace)
+
+    for rel_path in ("raw_data.dvc", "models/current_best/best.pt.dvc", "dvc.lock"):
+        candidate = workspace / rel_path
+        if candidate.exists():
+            candidate.unlink()
+
+    create_minimal_dataset(workspace)
+    write_params_yaml(
+        workspace,
+        {
+            "data": {
+                "dataset_name": "dvc-restore-runs",
+                "class_mapping": {},
+            },
+            "prepare": {
+                "auto_replay": {},
+            },
+            "train": {
+                "model": "yolov8n",
+                "epochs": 1,
+                "batch_size": 1,
+                "finetune": {
+                    "enabled": False,
+                    "weights": "models/finetune/best.pt",
+                },
+            },
+            "models": {
+                "yolov8n": {
+                    "backend": "yolo",
+                    "asset_id": "yolov8n.pt",
+                }
+            },
+            "evaluation": {
+                "baseline_weights_path": "models/local_only/best.pt",
+            },
+        },
+    )
+    create_local_yolo_checkpoint(workspace)
+
+    env = _make_env(workspace)
+    _init_dvc_workspace(workspace, env)
+    experiment_name = "dvc-restore-runs"
+    _run_dvc(
+        workspace,
+        env,
+        "exp",
+        "run",
+        "-n",
+        experiment_name,
+        "evaluate_model",
+        check=True,
+    )
+    _assert_eval_artifacts(workspace)
+
+    shutil.rmtree(workspace / "runs")
+    shutil.rmtree(workspace / "results_comparison")
+    (workspace / "metrics.json").unlink()
+
+    _run_dvc(workspace, env, "exp", "apply", experiment_name, check=True)
+    _assert_eval_artifacts(workspace)
 
 
 def test_dvc_evaluate_model_fails_when_promoted_baseline_weights_missing(tmp_path: Path) -> None:
@@ -785,6 +870,8 @@ def test_dvc_evaluate_model_writes_merged_class_metrics_for_project_mapping(tmp_
 
     payload = json.loads((workspace / "runs" / ".last_train_result.json").read_text(encoding="utf-8"))
     run_dir = Path(payload["train_output_dir"])
+    if not run_dir.is_absolute():
+        run_dir = workspace / run_dir
     merged_results = run_dir / "merged_class_results.csv"
     assert merged_results.exists()
     merged_rows = merged_results.read_text(encoding="utf-8")

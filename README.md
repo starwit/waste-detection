@@ -103,8 +103,15 @@ poetry run dvc exp run
 
 Use this if you do not have access to this repo's DVC remote but still want to run `dvc exp run` end-to-end on your own data.
 
-1. Put your training data under `raw_data/train/`.
-2. For evaluation, either provide `raw_data/test/` or set a non-zero test split (example below).
+1. Remove remote DVC pointers from your local checkout if they are present:
+
+```bash
+rm -f raw_data.dvc models/current_best/best.pt.dvc
+poetry run dvc remote remove dvc-hetzner
+```
+
+2. Put your training data under `raw_data/train/`.
+3. For evaluation, either provide `raw_data/test/` or set a non-zero test split (example below).
 
 Run the full pipeline with a local baseline path (this disables baseline comparison):
 
@@ -117,8 +124,11 @@ poetry run dvc exp run -n local \
 Notes:
 
 - This does not require this repo's DVC remote, but some backends may still download upstream pretrained assets (see `models_defaults.<backend>.allow_download`).
+- `raw_data.dvc` and `models/current_best/best.pt.dvc` belong to this promoted project. If they remain in a no-remote checkout, DVC may still try to restore those remote-tracked files during `dvc exp run` or `dvc exp apply`.
 - `models/local_only/best.pt` is intentionally treated as “no baseline” (no nearby `metadata.yaml`), so evaluation runs on the trained model only.
 - Don’t drop a real weights file into `models/local_only/best.pt` unless you also add matching `metadata.yaml` next to it.
+- If `raw_data/test/` contains images, it is used as the test set and `prepare.test_split` is ignored. If `raw_data/test/` is absent, set `prepare.test_split > 0` for the full pipeline.
+- Empty `raw_data/train/` or split/subset settings that leave no training images fail before training starts.
 
 If you later want baseline comparison against the promoted baseline in this repo, pull it explicitly and rerun without the override:
 

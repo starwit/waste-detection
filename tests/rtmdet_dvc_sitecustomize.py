@@ -105,7 +105,7 @@ if os.environ.get("WD_TEST_RTMDET_DVC_STUB") == "1":
         resolved_cfg: dict,
         experiment_name: str | None,
     ):
-        run_dir = Path("runs") / "rtmdet" / "dvc-rtmdet-contract"
+        run_dir = Path(".dvc_artifacts") / "train_runs" / "dvc-rtmdet-contract"
         (run_dir / "weights").mkdir(parents=True, exist_ok=True)
         (run_dir / "weights" / "best.pt").write_bytes(b"rtmdet-trained-stub")
         model_config = run_dir / "model_config.py"
@@ -140,4 +140,3 @@ if os.environ.get("WD_TEST_RTMDET_DVC_STUB") == "1":
     _visual_comparison.generate_side_by_side_comparisons = lambda *a, **k: None
     _scene_metrics.calculate_scene_metrics = lambda *a, **k: {}
     _replay.build_or_update_replay_set = lambda *a, **k: None
-

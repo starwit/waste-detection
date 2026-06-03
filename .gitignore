@@ -50,6 +50,7 @@ Konsortialtreffen/*
 WAS_videos/
 
 .tmp
+.dvc_artifacts/
 
 *output*/
 
