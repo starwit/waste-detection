@@ -2787,7 +2787,7 @@ files = [
 
 [[package]]
 name = "object-detector-trainer"
-version = "0.1.0"
+version = "1.0.0"
 description = "Reusable multi-backend object detection training core"
 optional = false
 python-versions = ">=3.11,<4.0"
@@ -2826,8 +2826,8 @@ rtmdet = ["mmdet (>=3.3.0,<3.4.0)", "mmengine (>=0.10.7,<0.11.0)", "openmim (>=0
 [package.source]
 type = "git"
 url = "https://github.com/starwit/object-detector-trainer.git"
-reference = "8e4b6432ef18e88c78b094faa7855780a97ded46"
-resolved_reference = "8e4b6432ef18e88c78b094faa7855780a97ded46"
+reference = "v1.0.0"
+resolved_reference = "96f5c17fce45456d9c666d7fe893bb7970441acc"
 
 [[package]]
 name = "omegaconf"
@@ -5993,4 +5993,4 @@ test = ["zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "a81e0e002a0ef0dc697a24f33fbbd025c32fe9fb56447ab8064b03ee8566067a"
+content-hash = "2f286cf2950eea4fe32124f45559f103e497b00bddd8fb914b3ca748ca35492c"

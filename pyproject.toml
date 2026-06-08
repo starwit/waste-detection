@@ -12,7 +12,7 @@ dvc = "^3.60.1"
 dvc-ssh = "^4.2.1"
 ruamel-yaml = "^0.18.14"
 pyyaml = "^6.0.2"
-object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", rev = "8e4b6432ef18e88c78b094faa7855780a97ded46", extras = ["rtmdet"] }
+object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", tag = "v1.0.0", extras = ["rtmdet"] }
 
 
 [tool.poetry.group.dev.dependencies]
