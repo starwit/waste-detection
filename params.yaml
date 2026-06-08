@@ -6,20 +6,28 @@ data:
   # If not defined or empty, the system will fall back to selected COCO classes
   custom_classes:
     # Example custom classes (uncomment and modify as needed):
-  - waste
-  - cigarette
+    - waste
+    - cigarette
+    - leaf_pile
+    - leaf_region_dense
+    - leaf_region_sparse
+    - bottle
   use_coco_classes: false
-  
+
   # Class mapping configuration - merge multiple classes into one
   # This allows you to combine classes during training without changing raw data
   # Format: target_class: [source_class1, source_class2, ...]
   # Example: map both 'waste' and 'cigarette' into a single 'waste' class
   class_mapping:
-    waste: [waste, cigarette]  # Both waste and cigarette will be treated as waste
-    # Add more mappings as needed:
-    # trash: [waste, litter, garbage]
+    waste: [waste, bottle]
+    cigarette: [cigarette]
+    leaves_dense: [leaf_pile, leaf_region_dense]
+    leaves_sparse: [leaf_region_sparse]
+
 prepare:
   val_split: 0.1
+  # Used only when raw_data/test is absent. If raw_data/test contains images,
+  # that explicit test folder is used and this split is ignored.
   test_split: 0.1
   augment_multiplier: 1
   # Optional: automatically build/maintain a small replay set from last run's
@@ -32,11 +40,10 @@ prepare:
     conf_thr: 0.25         # prediction threshold
     border_conf: 0.35      # below this = borderline TP counted
     include_empty: true    # include some background/empty frames
-    seed: 42
     dest: raw_data/train/replay  # persistent location for replay set
   # Folder subset configuration - use only a percentage of images from specific folders
   folder_subsets:
-    # Example: use only 50% of images from uavvhgaste folder
+    # Example: use only 50% of images from uavvaste folder
     uavvaste: 0.1
     # Example: use only 30% of images from taco folder
     taco: 0.02
@@ -44,29 +51,107 @@ prepare:
     cw32-08-07-train: 1
     cw33: 1
     cw36-auto-mined: 1.0
-    cw41-auto-mined: 1.5
-    replay: 1.5
+    cw41-auto-mined: 1.0
+    cw39-sam3-gated: 1.5
+    cw39-maybe-false-positives: 1.5
+    replay: 0
     # Add more folders as needed. Folders not listed here will use 100% of their images
+
 train:
-  model_size: m
+  # Model key selected from models.<key>
+  model: yolo11m
+  # Shared defaults for all backends (can be overridden per model)
   image_size: 1280
   epochs: 100
-  batch_size: 8
-  # Fine-tuning configuration
-  finetune_mode: false  # Set to true to enable fine-tuning
-  pretrained_model_path: models/current_best/best.pt    # Path to pre-trained model
-  finetune_lr: 0.0012   # Suggested LR when fine-tuning with unfrozen backbone
-  finetune_epochs: 30   # Override total epochs during fine-tuning
-  freeze_backbone: true
-  optimizer: AdamW      # Prevent optimizer=auto from overriding lr0
-  mosaic: 0.15          # Gentle augmentations during fine-tuning
-  close_mosaic: 5
-  mixup: 0.0
-  cos_lr: true
-  lrf: 0.05
-  patience: 20
+  batch_size: 4
+  # Fine-tuning configuration (applies to YOLO backends)
+  finetune:
+    enabled: false
+    weights: models/finetune/best.pt
+    lr: 0.0012
+    epochs: 30
+    freeze_backbone: true
+    optimizer: AdamW
+    mosaic: 0.15
+    close_mosaic: 5
+    mixup: 0.0
+    cos_lr: true
+    lrf: 0.05
+    patience: 20
+
+models_defaults:
+  # Per-backend defaults applied to all models of that backend.
+  # Precedence: models.<key> overrides models_defaults.<backend>.
+  yolo:
+    cache_dir: models/pretrained/yolo
+    allow_download: true
+  rtmdet:
+    cache_dir: models/pretrained/rtmdet
+    allow_download: true
+  rfdetr:
+    cache_dir: models/pretrained/rfdetr
+    allow_download: true
+    batch_size: 2
+    target_effective_batch: 16
+    lr: 0.0001
+    gradient_checkpointing: false
+
+models:
+  yolov8m:
+    backend: yolo
+    asset_id: yolov8m.pt
+
+  yolo11m:
+    backend: yolo
+    asset_id: yolo11m.pt
+
+  rtmdet-tiny:
+    backend: rtmdet
+    asset_id: rtmdet_tiny_8xb32-300e_coco
+
+  rtmdet-s:
+    backend: rtmdet
+    asset_id: rtmdet_s_8xb32-300e_coco
+
+  rtmdet-m:
+    backend: rtmdet
+    asset_id: rtmdet_m_8xb32-300e_coco
+
+  rtmdet-l:
+    backend: rtmdet
+    asset_id: rtmdet_l_8xb32-300e_coco
+    batch_size: 2
+
+  rtmdet-x:
+    backend: rtmdet
+    asset_id: rtmdet_x_8xb32-300e_coco
+    batch_size: 2
+
+  rfdetr-medium:
+    backend: rfdetr
+    variant: medium
+    asset_id: rf-detr-medium.pth
+    resolution: 1280
+    epochs: 150
+    extra_train_kwargs:
+      num_workers: 4
+      multi_scale: true
+      expanded_scales: true
+      lr_drop: 120
+      checkpoint_interval: 10
+      warmup_epochs: 1.0
+      early_stopping: true
+      early_stopping_patience: 30
+      early_stopping_min_delta: 0.001
+  rfdetr-nano:
+    backend: rfdetr
+    variant: nano
+    asset_id: rf-detr-nano.pth
+    resolution: 1280
+    epochs: 80
+
 evaluation:
   # Baseline model for evaluation comparisons (optional)
   # - If file exists and has content: compares your trained model against it
-  # - If missing/empty: automatically uses YOLOv8 COCO checkpoint as baseline
+  # - If missing/empty (and not promoted): evaluation runs on the trained model only
   baseline_weights_path: models/current_best/best.pt

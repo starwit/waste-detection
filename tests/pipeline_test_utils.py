@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Shared helpers for assembling the lightweight datasets/params used in tests."""
+"""Project-side test fixtures for DVC and wrapper coverage.
+
+These helpers stay intentionally small and mostly YOLO-oriented because the
+generic multi-backend pipeline contract coverage lives in
+`object-detector-trainer`.
+"""
 
 import copy
 from pathlib import Path
@@ -22,18 +27,30 @@ BASE_PARAMS: Dict[str, Any] = {
         "val_split": 0.5,
         "test_split": 0.0,
         "augment_multiplier": 1,
+        "auto_replay": {"enabled": False},
         "folder_subsets": {},
     },
     "train": {
-        "model_size": "n",
+        "model": "yolov8n",
         "image_size": 320,
         "epochs": 1,
         "batch_size": 1,
-        "finetune_mode": False,
-        "pretrained_model_path": "models/current_best/best.pt",
-        "finetune_lr": 0.0001,
-        "finetune_epochs": 1,
-        "freeze_backbone": False,
+        "finetune": {
+            "enabled": False,
+            "weights": "models/finetune/best.pt",
+            "lr": 0.0001,
+            "epochs": 1,
+            "freeze_backbone": False,
+        },
+    },
+    "models_defaults": {
+        "yolo": {"cache_dir": "models/pretrained/yolo", "allow_download": True},
+    },
+    "models": {
+        "yolov8n": {
+            "backend": "yolo",
+            "asset_id": "yolov8n.pt",
+        },
     },
     "evaluation": {
         "baseline_weights_path": "models/current_best/best.pt",
@@ -48,6 +65,56 @@ def _merge_dict(target: dict, overrides: dict) -> dict:
         else:
             target[key] = value
     return target
+
+
+def _resolve_workspace_path(workspace: Path, raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    candidate = Path(str(raw_path)).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    return candidate
+
+
+def create_local_yolo_checkpoint(
+    workspace: Path,
+    *,
+    checkpoint_path: str = "models/pretrained/yolo/yolov8n.pt",
+    payload: bytes = b"stub-yolo-checkpoint",
+) -> Path:
+    resolved_path = _resolve_workspace_path(workspace, checkpoint_path)
+    if resolved_path is None:
+        raise ValueError("checkpoint_path must be provided for local YOLO checkpoint creation.")
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_path.write_bytes(payload)
+    return resolved_path
+
+
+def create_baseline_artifact(
+    workspace: Path,
+    *,
+    weights_path: str = "models/current_best/best.pt",
+    experiment_name: str = "baseline",
+    model_backend: str = "yolo",
+    image_size: int = 320,
+    model_variant: str | None = None,
+) -> Path:
+    baseline_path = _resolve_workspace_path(workspace, weights_path)
+    if baseline_path is None:
+        raise ValueError("weights_path must be provided for baseline artifact creation.")
+
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    baseline_path.write_bytes(b"baseline-stub")
+    metadata = {
+        "experiment_name": experiment_name,
+        "model_backend": model_backend,
+        "image_size": int(image_size),
+    }
+    if model_variant:
+        metadata["model_variant"] = str(model_variant)
+    with open(baseline_path.parent / "metadata.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(metadata, f, sort_keys=False)
+    return baseline_path
 
 
 def write_params_yaml(workspace: Path, overrides: dict | None = None) -> dict:
@@ -106,10 +173,7 @@ def build_args(dataset_name: str, overrides: dict | None = None):
         "stage": None,
         "seed": 42,
         "dataset_name": dataset_name,
-        "model_size": "n",
-        "image_size": 320,
-        "epochs": 1,
-        "batch_size": 1,
+        "model": None,
         "val_split": 0.5,
         "test_split": 0.0,
         "recreate_dataset": True,

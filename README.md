@@ -1,390 +1,251 @@
-# Waste Detection — YOLOv8 + DVC
+# Waste Detection
 
-This repository is a focused fork of our YOLO retraining template, specialized for detecting waste on streets. It uses DVC (Data Version Control) to track datasets, experiments, and trained models for reproducible results and easy collaboration.
+This repository contains the `waste-detection` training project. It uses DVC to track datasets, experiments, and the promoted comparison baseline, while the reusable training backend lives in the external `object-detector-trainer` package.
 
-### Why DVC here?
+Project workflow:
 
-- **Large files:** Keeps datasets and model weights out of Git history while versioning them alongside code.
-- **Reproducibility:** The exact model used for a release is pinned by `dvc.lock` and can be restored with `dvc pull`.
+- `poetry run dvc exp run` is the documented project workflow and executes the stages defined in `dvc.yaml`.
+- `train.py` is the thin project wrapper invoked by the DVC stages.
 
+Supported backends in this project:
 
-> About this fork
-> - Task: waste detection
-> - Current classes (from params.yaml): `waste`, `cigarette` (to keep it focused for now and not introduce too many classes while we don't have much training data)
-> - Pipeline: Ultralytics YOLOv8 with DVC-managed data and outputs
----
+- Ultralytics YOLO
+- RF-DETR
+- RTMDet
 
-## Table of Contents
-1. [Models & Releases](#models--releases)
-2. [Initial Project Setup](#initial-project-setup)
-3. [Managing Project Data](#managing-project-data)
-4. [Experiment Workflow](#experiment-workflow)
-5. [Custom Classes](#custom-classes)
-6. [Class Mapping](#class-mapping)
-7. [Raw Data Structure](#raw-data-structure)
-8. [Fine-tuning](#fine-tuning)
-9. [Folder Subsets](#folder-subsets)
-10. [Testing](#testing)
+RTMDet/OpenMMLab note:
 
----
+This project installs `object-detector-trainer` with RTMDet extras enabled.
 
-## Models & Releases
+RTMDet requires full `mmcv` ops (`mmcv`, not `mmcv-lite`). Two supported install methods:
 
-This repo publishes trained models with each GitHub Release and also tracks the currently applied model via DVC.
-
-- Latest model (main): The model currently applied on the main branch is the one referenced in `dvc.lock` under the `runs/` output. To fetch it locally, run `dvc pull` (requires access to the configured DVC remote).
-- Release assets: Each release includes the trained weights and metadata so you don’t need DVC to use the model:
-  - `weights/best.pt`: the promoted YOLO weights for inference
-  - `test_metrics.json`: evaluation metrics of the promoted run
-  - `metadata.yaml`: training metadata (experiment name, epochs, image size, etc.)
-
-### Baseline comparisons
-
-The training pipeline loads a baseline model for comparison during evaluation:
-
-- **First tries:** `evaluation.baseline_weights_path` from params.yaml (defaults to `models/current_best/best.pt`)
-- **Then tries:** Fine-tune weights if in finetune mode
-- **Falls back to:** Official YOLOv8 COCO checkpoint (always works, even on fresh clones)
-
-When you want to make a freshly trained run the new comparison baseline:
-
-1. Export the run’s best weights (and optional metadata) into `models/current_best/`:
-   ```bash
-   python yolov8_training/utils/export_baseline.py --run-dir runs/<experiment_name>
-   ```
-   You can override the weights or metadata paths via CLI flags if needed.
-2. Track the updated files with DVC so others can fetch them:
-   ```bash
-   dvc add models/current_best/best.pt models/current_best/metadata.yaml
-   dvc push
-   ```
-
-After these steps, subsequent training runs will compare against the newly exported baseline automatically.
-
-
-## Initial Project Setup
-
-Follow these steps once after creating this project from the template.
-
-**1. Create the New Repository**
-   - On the GitHub page for this template, click the **"Use this template"** button.
-   - Assign a name to your new repository (e.g., `waste-detection-2025`) and confirm its creation.
-
-**2. Clone Your New Repository**
-
-**3. Install Dependencies**
-   This project uses Poetry for dependency management.
-   ```bash
-   poetry install
-   poetry shell
-   ```
-
-**4. Run the Interactive Setup Script**
-
-A helper script configures the project’s connection to remote storage and (optionally) custom classes.
+Method 1: OpenMMLab prebuilt wheels
 
 ```bash
-python setup_project.py
+poetry run mim install mmcv==2.1.0
+poetry run python -c "import mmcv._ext"
 ```
 
-The script will:
-
-* prompt for a project & dataset name  
-* optionally ask for a comma-separated list of class names  
-* patch `.dvc/config` (remote URL) and `params.yaml` accordingly  
-* create the `raw_data/train` and `raw_data/test` folders
-
-**5. Commit the Initial Configuration**
-   The bootstrap script modifies configuration files. Commit these changes to save the project setup.
-   ```bash
-   git add .dvc/config params.yaml
-   git commit -m "Initialize project configuration"
-   ```
-The project is now fully configured and ready for data.
-
----
-
-## Managing Project Data
-
-After the initial setup, follow this process whenever you add or update the raw dataset.
-
-**1. Add Your Data**
-   - Place your new or updated data files into the `raw_data/train/` or `raw_data/test/` directories, following the structure guide below.
-
-**2. Track Data with DVC**
-   - Use the `dvc add` command to tell DVC to track the state of your data directory.
-   ```bash
-   dvc add raw_data
-   ```
-   This command creates/updates a small `raw_data.dvc` file. This file acts as a pointer to the actual data, which DVC manages.
-
-**3. Commit the Pointer File with Git**
-   - Add the `.dvc` file to Git. This records the "version" of your data that corresponds to your code.
-   ```bash
-   git add raw_data.dvc
-   git commit -m "Add new batch of training images"
-   ```
-
-**4. Push Both Code and Data**
-   Pushing is a two-step process: `dvc push` uploads your large data files to the shared Hetzner storage, and `git push` uploads your code and the small DVC pointer file.
-   ```bash
-   # Step 1: Upload the actual data files to remote storage
-   dvc push
-
-   # Step 2: Upload the code and data pointers
-   git push
-   ```
-
----
-
-## Experiment Workflow
-
-This project uses a structured workflow for training and promoting models. The key principle is to perform extensive experimentation locally and only commit significant, "winning" models to the main project history.
-
-### 1  Configure Parameters
-
-All training parameters live in **`params.yaml`**.  
-Key fields:
-
-```yaml
-data:
-  dataset_name: waste-detection
-  experiment_name: waste-detection
-
-  # ↓ Optional — override COCO classes
-  custom_classes:
-    - "waste"
-    - "cigarette"
-  use_coco_classes: false     # fallback to COCO if true/empty
-
-train:
-  model_size: m
-  image_size: 1280
-  epochs: 50
-  batch_size: 8
-```
-
-* If `custom_classes` is non-empty, those names become class 0…n-1.  
-* If it’s empty **and** `use_coco_classes: true`, the predefined COCO subset is used.
-
-### Step 2: Run Experiments
-Execute experiments using the `dvc exp run` command. This process is entirely local and does not create any Git commits. Use the `-n` flag to assign a descriptive name to each run.
+Method 2: build from source (requires a working CUDA toolkit and a C++ compiler)
 
 ```bash
-# Run an experiment with the settings from params.yaml
-dvc exp run -n "large-model-150-epochs"
-```
-For quick iterations, you can override parameters from the command line with the `-S` flag:
-```bash
-# Test a different parameter without editing params.yaml
-dvc exp run -n "test-smaller-batch-size" -S train.batch_size=4
+MMCV_WITH_OPS=1 poetry run pip install "mmcv==2.1.0" --no-binary=mmcv --no-build-isolation --no-cache-dir
+poetry run python -c "import mmcv._ext"
 ```
 
-### Step 3: Review and Compare Results
-Use `dvc exp show` to display a leaderboard of all local experiments. This table includes the parameters and performance metrics for each run, allowing for easy comparison.
-
-```bash
-# Sort the table by a key metric to find the best performer
-dvc exp show --sort-by metrics/fitness --sort-order desc
-```
-
-### Step 4: Promote a Winning Experiment
-Once you identify a superior experiment, promote it to become the official version in the main project branch.
-
-1.  **Apply the winner's results** to your workspace. This command updates your `params.yaml` and output files to match the state of the selected experiment.
-    ```bash
-    dvc exp apply <name-of-your-winning-experiment>
-    ```
-
-2.  **Commit this "Golden" version** to Git. This is the only time a commit is made after a series of experiments.
-    ```bash
-    git add .
-    git commit -m "Promote new model with 150 epochs, achieves 0.92 fitness"
-    ```
-
-3.  **Push the final result** to the shared remotes.
-    ```bash
-    dvc push  # Uploads the winning model's data files
-    git push  # Pushes the commit with the updated project state
-    ```
-
----
-
-## Custom Classes
-
-This fork is configured for waste detection. By default, the classes are defined in `params.yaml`:
-
-```yaml
-data:
-  custom_classes:
-    - waste
-    - cigarette
-  use_coco_classes: false
-```
-
-To change classes, edit `params.yaml` or re-run `python setup_project.py` and follow the prompts. The pipeline will remap labels of imported datasets where a `data.yaml` is present.
-
----
-
-## Class Mapping
-
-The class mapping feature allows you to **merge multiple classes into one** during training and evaluation without modifying your raw data. This is useful for testing if combining similar classes improves detection performance.
-
-### How to Use
-
-Edit `params.yaml` to add a `class_mapping` configuration:
-
-```yaml
-data:
-  custom_classes:
-    - waste
-    - cigarette
-  use_coco_classes: false
-  
-  # Merge classes together during training
-  class_mapping:
-    waste: [waste, cigarette]  # Both will be treated as 'waste'
-```
-
-With this configuration:
-- Your raw data remains unchanged in `raw_data/`
-- During dataset preparation, labels are automatically remapped
-- The model trains with only 1 class: `waste`
-- All cigarette detections are treated as waste detections
-
-### Example: Testing Class Merging
-
-To test if merging `waste` and `cigarette` improves cigarette detection:
-
-1. Add the mapping to `params.yaml` as shown above
-2. Run the pipeline: `dvc repro` or `dvc exp run -n "merged-classes"`
-3. Compare results with your baseline (separate classes)
-4. Keep the mapping if results improve, otherwise revert it
-
-### More Examples
-
-**Multiple merge groups:**
-```yaml
-class_mapping:
-  recyclable: [plastic_bottle, glass_bottle, aluminum_can]
-  organic: [food_waste, paper]
-```
-
-**Partial mapping (keep some classes separate):**
-```yaml
-custom_classes: [waste, cigarette, person]
-class_mapping:
-  waste: [waste, cigarette]
-  # person remains separate
-```
-
-For detailed documentation, see [`docs/CLASS_MAPPING.md`](docs/CLASS_MAPPING.md).
-
-> **Note:** When importing datasets, the pipeline also automatically maps classes from source `data.yaml` files to your configured classes based on name matching.
-
----
+Recommended Python for RTMDet/OpenMMLab: 3.11 (`poetry env use 3.11`).
 
 ## Testing
 
-This project includes unit tests and an end-to-end (E2E) pipeline smoke test.
+There are two testing layers and they intentionally cover different things.
 
-- Using unittest
-  - Run all tests:
-    ```bash
-    poetry run python -m unittest -v
-    ```
+Project-level tests in this repo:
 
-- Using pytest (optional)
-  - Install dev dependencies once:
-    ```bash
-    poetry install --with dev
-    ```
-  - Run tests:
-    ```bash
-    poetry run pytest -q
-    ```
+- `poetry run pytest`
+  Fast contract tests for config resolution, wrapper behavior, and offline pipeline contracts.
+- `poetry run pytest --heavy`
+  Heavy project integration tests for DVC experiment wiring, fresh-clone behavior, rerun invalidation, baseline semantics, and project outputs.
+  These tests execute the project `dvc exp run` workflow inside temporary git-backed workspaces and use lightweight backend stubs so they stay deterministic and do not depend on downloading real model assets.
 
-Notes
-- The E2E test creates a tiny synthetic dataset under a temporary directory and runs both the prepare and train/eval stages. It also checks that scene metrics are exported in `results_comparison/results.csv`.
-- Tests run on CPU with a minimal YOLOv8n configuration and a single epoch to keep runtime low.
+Trainer-level tests in `object-detector-trainer`:
 
----
+- Real backend-specific one-epoch contracts live in the trainer repo, not in this project repo.
+- Run those from an `object-detector-trainer` checkout when you change trainer behavior.
+- Those heavy trainer tests call real bootstrap directly and run one canonical real-training model per supported backend.
+- The trainer heavy suite fails if a new backend is added to the supported-backend registry without adding a representative heavy-test case for it.
+- The first heavy trainer run may download backend assets; later runs reuse the shared cache under `models/pretrained/<backend>/`.
+- The trainer repo uses Poetry for installs and test runs.
 
-## Raw Data Structure
+## Clone And Setup
 
-Put your raw data in `raw_data/train/` (for train+val) and `raw_data/test/` (for the final hold‑out set).  
-The importer now accepts **any** of the following:
+Typical fresh-clone setup:
 
-| # | Layout | What to do | Notes |
-|---|--------|------------|-------|
-| 1 | **CVAT YOLO export** | Drop the whole export folder (`data.yaml`, `images/`, `labels/`, `train.txt`). | `train.txt` is automatically parsed. |
-| 2 | **Standard YOLO** | Inside a subfolder create `images/` & `labels/`. | Class IDs will be remapped if needed. |
-| 3 | **Scene‑based test sets** | One subfolder per scene, each with its own `images/` & `labels/`. | Scene name is appended to filenames so metrics stay separate. |
-| 4 | **Any folder that already contains a `data.yaml` / `dataset.yaml`** | Just copy it in. | Class IDs will be remapped if needed (names have to be the same as in params.yaml). |
-
-> **Tip:** When you use option 4 you can bring in public datasets or prior labeling runs “as is”.  
-> The importer detects the YAML, builds a temporary copy, remaps the labels, and keeps going—no manual edits required.
-
-Example scene‑based layout:
-
-```
-raw_data/
-└── test/
-    ├── Wolfsburg/
-    │   ├── images/
-    │   └── labels/
-    └── Carmel/
-        ├── images/
-        └── labels/
+```bash
+poetry install
 ```
 
-## Fine-tuning
+Note: `dvc exp run` creates experiment commits. If Git complains about missing user name/email, configure them (globally or in this repo):
 
-You can fine-tune from a pre-trained checkpoint (e.g., a prior waste model) instead of starting from the base YOLOv8 weights.
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
 
-Configure in `params.yaml` under `train`:
+Or only for this repo:
 
-```yaml
-train:
-  finetune_mode: true              # enable fine-tuning
-  pretrained_model_path: taco-uav-model.pt
-  finetune_lr: 0.0001              # lower LR for fine-tuning
-  finetune_epochs: 60              # optional override for epochs
-  freeze_backbone: false           # optionally freeze early layers
+```bash
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
+DVC access note:
+
+- The checked-in DVC remote for this repo uses SSH.
+- If you have access, `poetry run dvc pull` works as documented below.
+- If you do not have access, skip `poetry run dvc pull`, provide your own `raw_data/`, and use the local workflow below.
+
+## Quick Start
+
+Pick one workflow. This repo is designed to be reproducible via its DVC remote (dataset + promoted baseline). If you don't have remote access you can still run the pipeline locally on your own data, but you won't get baseline comparison against this repo's promoted baseline.
+
+### Recommended: reproduce the promoted project (requires DVC remote access)
+
+Use this when you want the repo as promoted in Git and DVC:
+
+```bash
+poetry install
+poetry run dvc pull raw_data
+poetry run dvc pull models/current_best/best.pt
+poetry run dvc exp run
+```
+
+### Without DVC remote access (local data, evaluation only)
+
+Use this if you do not have access to this repo's DVC remote but still want to run `dvc exp run` end-to-end on your own data.
+
+1. Remove remote DVC pointers from your local checkout if they are present:
+
+```bash
+rm -f raw_data.dvc models/current_best/best.pt.dvc
+poetry run dvc remote remove dvc-hetzner
+```
+
+2. Put your training data under `raw_data/train/`.
+3. For evaluation, either provide `raw_data/test/` or set a non-zero test split (example below).
+
+Run the full pipeline with a local baseline path (this disables baseline comparison):
+
+```bash
+poetry run dvc exp run -n local \
+  -S evaluation.baseline_weights_path=models/local_only/best.pt \
+  -S prepare.test_split=0.2
 ```
 
 Notes:
-- When fine-tuning, the pipeline evaluates the chosen pretrained model as the baseline and compares it to the fine-tuned result.
-- The DVC pipeline depends on `pretrained_model_path` so runs are reproducible. Make sure the file is available (via DVC or local path).
 
----
+- This does not require this repo's DVC remote, but some backends may still download upstream pretrained assets (see `models_defaults.<backend>.allow_download`).
+- `raw_data.dvc` and `models/current_best/best.pt.dvc` belong to this promoted project. If they remain in a no-remote checkout, DVC may still try to restore those remote-tracked files during `dvc exp run` or `dvc exp apply`.
+- `models/local_only/best.pt` is intentionally treated as “no baseline” (no nearby `metadata.yaml`), so evaluation runs on the trained model only.
+- Don’t drop a real weights file into `models/local_only/best.pt` unless you also add matching `metadata.yaml` next to it.
+- If `raw_data/test/` contains images, it is used as the test set and `prepare.test_split` is ignored. If `raw_data/test/` is absent, set `prepare.test_split > 0` for the full pipeline.
+- Empty `raw_data/train/` or split/subset settings that leave no training images fail before training starts.
 
-## Folder Subsets
-
-To limit or oversample specific source folders during dataset preparation, use `prepare.folder_subsets` in `params.yaml` or the CLI override.
-
-Example `params.yaml` configuration:
-
-```yaml
-prepare:
-  val_split: 0.1
-  test_split: 0.1
-  augment_multiplier: 1
-  folder_subsets:
-    uavvaste: 0.5        # use 50% of images from this folder
-    taco: 0.2            # use 20%
-    cw32-08-07-train: 2  # 200% = oversample
-```
-
-CLI override (multiple allowed):
+If you later want baseline comparison against the promoted baseline in this repo, pull it explicitly and rerun without the override:
 
 ```bash
-python yolov8_training/train_pipeline.py \
-  --stage prepare -d waste-detection \
-  --folder-subset uavvaste 0.5 \
-  --folder-subset cw32-08-07-train 2.0
+poetry run dvc pull models/current_best/best.pt
+poetry run dvc exp run
 ```
 
-Behavior:
-- Ratios between 0 and 1.0 subsample a folder.
-- Ratios > 1.0 oversample by repeating images; cross-folder duplicates are removed so balancing doesn’t leak duplicates between sources.
+## Baseline Behavior (why `dvc pull models/current_best/best.pt` matters)
+
+This repo has a promoted baseline at `models/current_best/`. The baseline metadata is committed to Git (so everyone agrees what the baseline *is*), while the weights file is tracked via DVC.
+
+- If `models/current_best/metadata.yaml` exists, evaluation expects the corresponding weights file to be present locally (pull it via DVC). If it’s missing, evaluation fails loudly so you don’t accidentally compare against “nothing”.
+- On a fresh clone, the pipeline creates 0-byte placeholders for configured weight paths so DVC stage dependencies are valid. Those placeholders are not usable weights; runtime code treats empty files as missing.
+
+## Data Workflow
+
+When you update the dataset for this project:
+
+```bash
+poetry run dvc add raw_data
+git add raw_data.dvc
+git commit -m "Update training data"
+poetry run dvc push
+git push
+```
+
+For a local-only experiment, you can skip `poetry run dvc add`, `poetry run dvc push`, and the Git steps entirely.
+
+Expected raw data layout:
+
+- `raw_data/train/<source>/images/*`
+- `raw_data/train/<source>/labels/*`
+- `raw_data/test/<source>/images/*`
+- `raw_data/test/<source>/labels/*`
+
+## Training Workflow
+
+Project parameters live in `params.yaml`.
+
+Useful configuration rules:
+
+- `train.image_size`, `train.epochs`, and `train.batch_size` are shared defaults.
+- `train.finetune.weights` is an optional fine-tune input path and defaults to `models/finetune/best.pt`.
+- The promoted comparison baseline stays at `models/current_best/best.pt` and is tracked separately via DVC.
+- `models_defaults.<backend>` applies per-backend defaults to every model of that backend.
+- `models.<key>` overrides both shared and backend defaults.
+- `models.<key>.asset_id` identifies the pretrained asset to bootstrap for the selected backend.
+
+If you want to fine-tune from the promoted baseline, set:
+
+```bash
+poetry run dvc exp run -S train.finetune.enabled=true -S train.finetune.weights=models/current_best/best.pt
+```
+
+Run the full DVC experiment pipeline:
+
+```bash
+poetry run dvc exp run -n "my-experiment"
+```
+
+Override parameters for a one-off experiment:
+
+```bash
+poetry run dvc exp run -n "test-smaller-batch" -S train.batch_size=4
+```
+
+Review local experiment results:
+
+```bash
+poetry run dvc exp show --sort-by metrics/fitness --sort-order desc
+```
+
+Promote an experiment into your workspace:
+
+```bash
+poetry run dvc exp apply <experiment-name>
+```
+
+## Promoting A New Baseline
+
+To make a trained run the new comparison baseline:
+
+```bash
+poetry run python tools/export_baseline.py --run-dir runs/<experiment_name>
+```
+
+Then track the promoted artifacts explicitly:
+
+```bash
+poetry run dvc add models/current_best/best.pt
+poetry run dvc push
+git add models/current_best/best.pt.dvc
+git add models/current_best/metadata.yaml
+```
+
+If the exported run is RTMDet-based, also commit the copied config:
+
+```bash
+git add models/current_best/model_config.py
+```
+
+This repo keeps `metadata.yaml` and `model_config.py` in Git, while `best.pt` is tracked via DVC.
+
+## Current Project Context
+
+This project trains the following merged output classes:
+
+- `waste`
+- `cigarette`
+- `leaves_dense`
+- `leaves_sparse`
+
+The raw class mapping is configured in `params.yaml`.
+
+## Training Backend
+
+The reusable training core lives in:
+
+- https://github.com/starwit/object-detector-trainer

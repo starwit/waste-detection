@@ -1,8 +1,40 @@
 # dvc.yaml
 stages:
+  # Preflight: create placeholder files for optional direct DVC deps such as
+  # finetune/baseline paths so dependency checks stay deterministic on fresh clones.
+  check_optional_weight_deps:
+    cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
+    deps:
+      - params.yaml
+      - pyproject.toml
+      - poetry.lock
+    outs:
+      - .tmp/dvc_bootstrap.txt
+    always_changed: true
+
+  # Bootstrap: provision the selected model assets and write a manifest that
+  # downstream stages depend on. Baseline weights remain an explicit `dvc pull`
+  # (evaluation will fail loudly if a promoted baseline is missing locally).
+  bootstrap_model_assets:
+    cmd: >
+      python -m train --stage bootstrap
+      --model ${train.model}
+    params:
+      - train.model
+      - models_defaults
+      - models
+    deps:
+      - train.py
+      - pyproject.toml
+      - poetry.lock
+      - .tmp/dvc_bootstrap.txt
+    outs:
+      - .tmp/bootstrap_manifest.json
+    always_changed: true
+
   prepare_data:
     cmd: >
-      python yolov8_training/train_pipeline.py --stage prepare
+      python -m train --stage prepare
       --dataset-name ${data.dataset_name}
       --val-split ${prepare.val_split}
       --test-split ${prepare.test_split}
@@ -12,40 +44,63 @@ stages:
       - data
       - prepare
     deps:
-      - yolov8_training/train_pipeline.py
-      - yolov8_training/utils/data_utils.py
-      - yolov8_training/utils/find_duplicates.py
-      - yolov8_training/utils/augmentation.py
+      - train.py
+      - pyproject.toml
+      - poetry.lock
       - raw_data/
     outs:
       - datasets/${data.dataset_name}
 
-  train_and_evaluate:
+  train_model:
     cmd: >
-      python yolov8_training/train_pipeline.py --stage train
+      python -m train --stage train
       --dataset-name ${data.dataset_name}
-      --model-size ${train.model_size}
-      --image-size ${train.image_size}
-      --epochs ${train.epochs}
-      --batch-size ${train.batch_size}
+      --model ${train.model}
       --val-split ${prepare.val_split}
     params:
       - data
       - prepare.val_split
+      - prepare.auto_replay
       - train
-      - evaluation.baseline_weights_path
+      - models_defaults
+      - models
     deps:
-      - yolov8_training/train_pipeline.py
-      - yolov8_training/utils/evaluate.py
-      - yolov8_training/utils/data_utils.py
-      - yolov8_training/utils/find_duplicates.py
+      - train.py
+      - pyproject.toml
+      - poetry.lock
+      - .tmp/dvc_bootstrap.txt
+      - .tmp/bootstrap_manifest.json
       - datasets/${data.dataset_name}
-      # Track configured baseline paths for DVC change detection
-      # Stub files (0-byte) satisfy DVC deps but are rejected by training code
-      - ${train.pretrained_model_path}
+      # Optional direct dependency: placeholder created by the preflight stage.
+      - ${train.finetune.weights}
+    outs:
+      - .dvc_artifacts/train_runs
+      - .dvc_artifacts/last_train_result.json
+
+  evaluate_model:
+    cmd: >
+      python -m train --stage evaluate
+      --dataset-name ${data.dataset_name}
+      --model ${train.model}
+      --val-split ${prepare.val_split}
+    params:
+      - data
+      - prepare.val_split
+      - train.model
+      - evaluation.baseline_weights_path
+      - data.class_mapping
+    deps:
+      - train.py
+      - pyproject.toml
+      - poetry.lock
+      - .tmp/dvc_bootstrap.txt
+      - .tmp/bootstrap_manifest.json
+      - .dvc_artifacts/last_train_result.json
+      - .dvc_artifacts/train_runs
+      # Optional direct dependency: placeholder created by the preflight stage.
       - ${evaluation.baseline_weights_path}
     outs:
       - runs
       - results_comparison/
-    metrics: 
+    metrics:
       - metrics.json
